@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 15:37:34
-LastEditTime: 2024-03-25 15:27:47
+LastEditTime: 2024-03-25 19:04:35
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/train.py
 '''
@@ -44,43 +44,69 @@ def log_recons_image(datasetname, name, x, x_rec, steps, writer):
     writer.flush()
 
 
-def train(model, optimizer, lpips, train_dataloader, data_config, train_config, accelerator, writer, logger):
-    device = accelerator.device
+def train_one_epoch(model, optimizer, lpips, train_dataloader, data_config, train_config, accelerator, writer, logger, cur_epoch):
     model.train()
-    lpips = lpips.to(device)
-    
     print_steps = len(train_dataloader) // train_config.print_freq
 
-    for epoch in range(train_config.epochs):
-        logger.info(f"Epoch {epoch+1}/{train_config.epochs}")
-        for i, (img, _) in tqdm(enumerate(train_dataloader)):
-            img = img.to(device)
-            optimizer.zero_grad()
-            output = model(img)
-            lpips_loss = lpips(output, img)
-            # check if the loss is nan
-            if torch.isnan(lpips_loss).any():
-                logger.error(f"Loss is nan at epoch {epoch+1}, iteration {i+1}")
-                raise Exception("Loss is nan")
-            # check the shape of the loss
-            loss = lpips_loss
-            loss = loss.mean()
-            loss.backward()
-            optimizer.step()
-            global_steps = epoch * len(train_dataloader) + i
-            
+    for i, (img, _) in tqdm(enumerate(train_dataloader)):
+        optimizer.zero_grad()
+        output = model(img)
+        lpips_loss = lpips(output, img).mean()
+        # check if the loss is nan
+        if torch.isnan(lpips_loss).any():
+            logger.error(f"Loss is nan at epoch {cur_epoch}, iteration {i}")
+            raise Exception("Loss is nan")
+        # check the shape of the loss
+        loss_l1 = (img - output).abs().mean()
+        loss = lpips_loss + loss_l1
+        accelerator.backward(loss)
+        optimizer.step()
+        global_steps = cur_epoch * len(train_dataloader) + i
+        
+        if accelerator.is_main_process:
             if i % print_steps==0:
-                logger.info(f'Epoch {epoch+1}/{train_config.epochs}, iteration {i}/{len(train_dataloader)}, loss: {loss.item()}')
+                logger.info(f'Epoch {cur_epoch}/{train_config.epochs}, iteration {i}/{len(train_dataloader)}, loss: {loss.item()}, l1 loss: {loss_l1.item()}, lpips loss: {lpips_loss.mean().item()}')
+                writer.add_scalar('train/l1_loss', loss_l1.item(), global_steps)
                 writer.add_scalar('train/loss', loss.item(), global_steps)
                 writer.add_scalar('train/lpips_loss', lpips_loss.mean().item(), global_steps)
                 log_recons_image(data_config.dataset_name,'train/recons', img, output, global_steps, writer)
-            
+
+def validation_one_epoch(model, lpips, val_dataloader, data_config, train_config, accelerator, writer, logger, cur_epoch):
+    device = accelerator.device
+    model.eval()
+    lpips = lpips.to(device)
+    total_loss = 0
+    total_l1_loss = 0
+    total_lpips_loss = 0
+    item = 0
+
+    with torch.no_grad():
+        for i, (img, _) in tqdm(enumerate(val_dataloader)):
+            img = img.to(device)
+            output = model(img)
+            lpips_loss = lpips(output, img).mean()
+            loss_l1 = (img - output).abs().mean()
+            loss = lpips_loss + loss_l1
+            total_loss += loss.item() * img.shape[0]
+            total_l1_loss += loss_l1.item() * img.shape[0]
+            total_lpips_loss += lpips_loss.item() * img.shape[0]
+            item += img.shape[0]
+        total_loss /= item
+        total_l1_loss /= item
+        total_lpips_loss /= item
+
+        total_loss, total_l1_loss, total_lpips_loss, item = accelerator.gather((total_loss, total_l1_loss, total_lpips_loss, item))
+
+        if accelerator.is_main_process:
+            logger.info(f'Epoch {cur_epoch}/{train_config.epochs}, validation loss: {total_loss}, l1 loss: {total_l1_loss}, lpips loss: {total_lpips_loss}')
+            writer.add_scalar('val/total_loss', total_loss, cur_epoch)
+            writer.add_scalar('val/total_l1_loss', total_l1_loss, cur_epoch)
+            writer.add_scalar('val/total_lpips_loss', total_lpips_loss, cur_epoch)
+            log_recons_image(data_config.dataset_name, 'val/recons', img, output, cur_epoch, writer)
+    return total_loss
+         
 
 def main(args):
-    # logger setting
-    logger.remove()
-    logger.add(os.path.join(args.result_dir, 'log.txt'))
-    logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 
     # config file load
     logger.info(f"Loading config file from {args.config_path}")
@@ -108,6 +134,11 @@ def main(args):
             raise Exception("result_dir exists")
     copyfile(args.config_path, os.path.join(args.result_dir, 'config.yaml'))
     logger.info(f"Result directory created successfully: {args.result_dir}")
+
+    # logger setting
+    logger.remove()
+    logger.add(os.path.join(args.result_dir, 'log.txt'))
+    logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 
     # set random seed
     if args.random_seed is not None:
@@ -145,7 +176,6 @@ def main(args):
     writer = SummaryWriter(log_path, comment="comments")
 
     # multi gpu setting
-    sync_code = False
     if accelerator.state.num_processes > 1:
         num_processes = accelerator.state.num_processes
         logger.info("The number of gpus used: ", num_processes)
@@ -174,18 +204,53 @@ def main(args):
     logger.info(f"Input channel: {ch_in}, resolution: {resolution}, ch_muls: {ch_muls}")
     model = FRAE(ch_in, model_config.bs_chanel, resolution, ch_muls, model_config.dropout)
     logger.info("Model initialized successfully")
-    
-    # prepare model and etc with accelerator
-    model = accelerator.prepare(model)
 
     # optimizer and loss function setting 
     optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
     lpips = LPIPS(net='vgg')
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=train_config.lr_decay_step, gamma=train_config.lr_decay_rate)
+
+    # prepare model and etc with accelerator
+    model, optimizer, train_dataloader, val_dataloader, lpips = accelerator.prepare(model, optimizer, train_dataloader, val_dataloader, lpips)
+
+    #if not resume:
+    ############################
+    cur_epoch = 0
+    best_loss = 1e10
+    ############################
+    #else:
+    # cur_epoch = resume_epoch + 1
+    # best_loss = resume_loss
+    # data_config = resume_data_config
+    # model_config = resume_model_config
+    # replace train config with new config
 
     # training loop
     logger.info("Start training...")
-    train(model, optimizer, lpips, train_dataloader,data_config, train_config, accelerator, writer, logger)
-
+    for epoch in range(cur_epoch, train_config.epochs):
+        train_one_epoch(model, optimizer, lpips, train_dataloader, data_config, train_config, accelerator, writer, logger, epoch)
+        scheduler.step()
+        loss = validation_one_epoch(model, lpips, val_dataloader, data_config, train_config, accelerator, writer, logger, epoch)
+        writer.add_scalar('train/lr', optimizer.param_groups[0]['lr'], epoch*len(train_dataloader))
+        
+        accelerator.wait_for_everyone()
+        if accelerator.is_main_process:
+            state = {
+                'model': accelerator.unwrap_model(model).state_dict(),
+                'epoch': epoch,
+                'loss': loss,
+                'data_config': data_config,
+                'model_config': model_config,
+                'train_config': train_config
+            }
+            if loss < best_loss:
+                best_loss = loss
+                logger.info(f"Best model found at epoch {epoch}, saving...")
+                torch.save(state, os.path.join(args.result_dir, 'best_model.pt'))
+            logger.info(f"Saving model at epoch {epoch}...")
+            torch.save(state, os.path.join(args.result_dir, f'model_{epoch}.pt'))
+            logger.info(f"Model saved successfully")
+        
 
 # Running this script at the project root directory
 if __name__ == "__main__":
