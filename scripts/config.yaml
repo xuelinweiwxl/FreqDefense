@@ -5,6 +5,7 @@
 # LastEditors: xuelinwei xuelinwei@seu.edu.cn
 # FilePath: /FreqDefense/scripts/train.py
 
+resume: False
 random_seed: 981217
 # result_name: 'test2'
 data_config:

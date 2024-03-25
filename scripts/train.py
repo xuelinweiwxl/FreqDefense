@@ -131,26 +131,50 @@ def main(args):
         raise Exception("config_path not found")
     logger.info("Config file loaded successfully")
 
-    # create result directory
-    if not 'result_name' in args.__dict__:
-        experiment_id = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
-        args.result_dir = os.path.join(args.result_dir, experiment_id)
-        if not os.path.exists(args.result_dir):
-            os.makedirs(args.result_dir)
-    else:
-        experiment_id = args.result_name
-        args.result_dir = os.path.join(args.result_dir, experiment_id)
-        if not os.path.exists(args.result_dir):
-            os.makedirs(args.result_dir)
+    if 'resume' in args.__dict__ and args.resume:
+        args.result_dir = os.path.join(args.result_dir, args.resume_result)
+        args.resume_result = os.path.join(args.result_dir, 'last_model.pt')
+        logger.info(f"Resuming training from {args.resume_result}")
+        if os.path.exists(args.resume_result):
+            checkpoint = torch.load(args.resume_result)
+            data_config = checkpoint['data_config']
+            model_config = checkpoint['model_config']
+            train_config = DictToObject(args.train_config)
+            model_state = checkpoint['model']
+            logger.info(f"{args.resume_result} loaded successfully")
+            # logger setting
+            logger.remove()
+            experiment_id = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            logger.add(os.path.join(args.result_dir, f'log_resume_{experiment_id}.txt'))
+            logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
         else:
-            raise Exception("result_dir exists")
-    copyfile(args.config_path, os.path.join(args.result_dir, 'config.yaml'))
-    logger.info(f"Result directory created successfully: {args.result_dir}")
+            raise Exception("resume_path not found")
+    else:
+        # create result directory
+        if not 'result_name' in args.__dict__:
+            experiment_id = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            args.result_dir = os.path.join(args.result_dir, experiment_id)
+            if not os.path.exists(args.result_dir):
+                os.makedirs(args.result_dir)
+        else:
+            experiment_id = args.result_name
+            args.result_dir = os.path.join(args.result_dir, experiment_id)
+            if not os.path.exists(args.result_dir):
+                os.makedirs(args.result_dir)
+            else:
+                raise Exception("result_dir exists")
+        copyfile(args.config_path, os.path.join(args.result_dir, 'config.yaml'))
+        logger.info(f"Result directory created successfully: {args.result_dir}")
 
-    # logger setting
-    logger.remove()
-    logger.add(os.path.join(args.result_dir, 'log.txt'))
-    logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
+        # logger setting
+        logger.remove()
+        logger.add(os.path.join(args.result_dir, 'log.txt'))
+        logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
+
+        # objectify config
+        data_config = DictToObject(args.data_config)
+        model_config = DictToObject(args.model_config)
+        train_config = DictToObject(args.train_config)
 
     # set random seed
     if args.random_seed is not None:
@@ -166,11 +190,6 @@ def main(args):
         torch.cuda.manual_seed(0)
         torch.cuda.manual_seed_all(0)
     logger.info(f"Random seed has been setted: {args.random_seed}")
-
-    # objectify config
-    data_config = DictToObject(args.data_config)
-    model_config = DictToObject(args.model_config)
-    train_config = DictToObject(args.train_config)
 
     # distrubuted training and training device setting
     if 'distributed' in args.__dict__ and args.distributed:
@@ -222,20 +241,17 @@ def main(args):
     lpips = LPIPS(net='vgg')
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=train_config.lr_decay_step, gamma=train_config.lr_decay_rate)
 
+    if 'resume' in args.__dict__ and args.resume:
+        model.load_state_dict(model_state)
+        logger.info(f"Model loaded successfully from {args.resume_result}")
+        cur_epoch = checkpoint['epoch'] + 1
+        best_loss = checkpoint['loss']
+    else:
+        cur_epoch = 0
+        best_loss = 1e10
+
     # prepare model and etc with accelerator
     model, optimizer, train_dataloader, val_dataloader, lpips = accelerator.prepare(model, optimizer, train_dataloader, val_dataloader, lpips)
-
-    #if not resume:
-    ############################
-    cur_epoch = 0
-    best_loss = 1e10
-    ############################
-    #else:
-    # cur_epoch = resume_epoch + 1
-    # best_loss = resume_loss
-    # data_config = resume_data_config
-    # model_config = resume_model_config
-    # replace train config with new config
 
     # training loop
     logger.info("Start training...")

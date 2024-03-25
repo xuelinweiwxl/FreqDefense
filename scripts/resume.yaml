@@ -5,9 +5,13 @@
 # LastEditors: xuelinwei xuelinwei@seu.edu.cn
 # FilePath: /FreqDefense/scripts/train.py
 
+resume: True
+resume_result: '2024_03_25_19_53_48'
 random_seed: 981217
 train_config:
   distributed: False
   lr: 2.0e-6
-  epochs: 100
+  lr_decay_step: 200
+  lr_decay_rate: 4.0e-1
+  epochs: 800
   print_freq: 10
