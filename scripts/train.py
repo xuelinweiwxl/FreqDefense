@@ -30,6 +30,9 @@ from models.frae import FRAE
 from datasets.datautils import getDataloader, getImgaeSize, getNormalizeParameter
 from utils.utils import DictToObject
 
+######################################################################
+#  accelerate launch --multi_gpu --num_processes=2 scripts/train.py  #
+######################################################################
 # image log method
 @torch.no_grad()
 def log_recons_image(datasetname, name, x, x_rec, steps, writer):
@@ -75,13 +78,10 @@ def validation_one_epoch(model, lpips, val_dataloader, data_config, train_config
     device = accelerator.device
     model.eval()
     lpips = lpips.to(device)
-    total_loss = 0
-    total_l1_loss = 0
-    total_lpips_loss = 0
-    item = 0
+    total_loss, total_l1_loss, total_lpips_loss, item = torch.zeros(4).to(device)
 
     with torch.no_grad():
-        for i, (img, _) in tqdm(enumerate(val_dataloader)):
+        for _, (img, _) in tqdm(enumerate(val_dataloader)):
             img = img.to(device)
             output = model(img)
             lpips_loss = lpips(output, img).mean()
@@ -91,11 +91,21 @@ def validation_one_epoch(model, lpips, val_dataloader, data_config, train_config
             total_l1_loss += loss_l1.item() * img.shape[0]
             total_lpips_loss += lpips_loss.item() * img.shape[0]
             item += img.shape[0]
+        # gather all the loss
+        total_loss = accelerator.gather(total_loss)
+        total_l1_loss = accelerator.gather(total_l1_loss)
+        total_lpips_loss = accelerator.gather(total_lpips_loss)
+        item = accelerator.gather(item)
+
+        # calculate the mean loss
+        total_loss = total_loss.mean().item()
+        total_l1_loss = total_l1_loss.mean().item() 
+        total_lpips_loss = total_lpips_loss.mean().item()
+        item = item.sum().item()
+        
         total_loss /= item
         total_l1_loss /= item
         total_lpips_loss /= item
-
-        total_loss, total_l1_loss, total_lpips_loss, item = accelerator.gather((total_loss, total_l1_loss, total_lpips_loss, item))
 
         if accelerator.is_main_process:
             logger.info(f'Epoch {cur_epoch}/{train_config.epochs}, validation loss: {total_loss}, l1 loss: {total_l1_loss}, lpips loss: {total_lpips_loss}')
@@ -248,7 +258,7 @@ def main(args):
                 logger.info(f"Best model found at epoch {epoch}, saving...")
                 torch.save(state, os.path.join(args.result_dir, 'best_model.pt'))
             logger.info(f"Saving model at epoch {epoch}...")
-            torch.save(state, os.path.join(args.result_dir, f'model_{epoch}.pt'))
+            torch.save(state, os.path.join(args.result_dir, f'last_model.pt'))
             logger.info(f"Model saved successfully")
         
 
