@@ -2,16 +2,16 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-20 10:39:52
-LastEditTime: 2024-03-21 15:24:12
+LastEditTime: 2024-03-25 11:06:10
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
-FilePath: /FreqDefense/models/frvae.py
+FilePath: /FreqDefense/models/frae.py
 '''
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
-
+        
 # downsample module
 class Downsample(nn.Module):
     def __init__(self, channel):
@@ -74,34 +74,28 @@ class ResBlock(nn.Module):
 class Encoder(nn.Module):
     def __init__(self,
         ch_in = 3,
-        chanel = 64,
+        bs_chanel = 64,
         resolution = 256,
         ch_muls = [1,1,2,2,4,8],
-        z_dim = 1024,
         dropout = 0.0
     ):
         super().__init__()
-        self.conv_in = nn.Conv2d(ch_in, chanel, kernel_size=3, stride=1, padding=1)
-        ch_in = chanel
+        self.conv_in = nn.Conv2d(ch_in, bs_chanel, kernel_size=3, stride=1, padding=1)
+        ch_in = bs_chanel
         blocks = []
         cur_res = resolution
         for ch_mul in ch_muls:
-            ch_out = chanel * ch_mul
+            ch_out = bs_chanel * ch_mul
             blocks.append(ResBlock(ch_in, ch_out, dropout))
             blocks.append(Downsample(ch_out))
             cur_res = cur_res // 2
             ch_in = ch_out
         self.blocks = nn.Sequential(*blocks)
-        self.flat = nn.Flatten()
-        self.mu = nn.Linear(ch_in * cur_res * cur_res, z_dim)
-        self.logvar = nn.Linear(ch_in * cur_res * cur_res, z_dim)
+
     def forward(self, x):
         x = self.conv_in(x)
         x = self.blocks(x)
-        x = self.flat(x)
-        mu = self.mu(x)
-        logvar = self.logvar(x)
-        return mu, logvar
+        return x
 
 # encoder module
 # 1024 x 1: [1,2,2,4,8]
@@ -109,70 +103,57 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     def __init__(self,
         ch_in = 3,
-        chanel = 64,
+        bs_chanel = 64,
         resolution = 256,
         ch_muls = [1,1,2,2,4,8],
-        z_dim = 1024,
         dropout = 0.0
     ):
         super().__init__()
         cur_res = resolution // (2 ** len(ch_muls))
-        self.linear_in = nn.Linear(z_dim, chanel * ch_muls[-1] * cur_res * cur_res)
-        self.unflatten = nn.Unflatten(1, (chanel * ch_muls[-1], cur_res, cur_res))
         blocks = []
-        ch = chanel * ch_muls[-1]
+        ch = bs_chanel * ch_muls[-1]
         for ch_mul in ch_muls[::-1]:
-            ch_out = chanel * ch_mul
+            ch_out = bs_chanel * ch_mul
             blocks.append(ResBlock(ch, ch_out, dropout))
             blocks.append(Upsample(ch_out))
             cur_res = cur_res * 2
             ch = ch_out
         self.blocks = nn.Sequential(*blocks)
-        self.conv_out = nn.Conv2d(chanel, ch_in, kernel_size=3, stride=1, padding=1)
+        self.conv_out = nn.Conv2d(bs_chanel, ch_in, kernel_size=3, stride=1, padding=1)
 
-    def forward(self, z):
-        x = self.linear_in(z)
-        x = self.unflatten(x)
+    def forward(self, x):
         x = self.blocks(x)
         x = self.conv_out(x)
         return x
 
 # vae module
-class FRVAE(nn.Module):
+class FRAE(nn.Module):
     def __init__(self,
         ch_in = 3,
-        chanel = 64,
+        bs_chanel = 64,
         resolution = 256,
         ch_muls = [1,1,2,2,4,8],
-        z_dim = 1024,
         dropout = 0.0
     ):
         super().__init__()
-        self.encoder = Encoder(ch_in, chanel, resolution, ch_muls, z_dim, dropout)
-        self.decoder = Decoder(ch_in, chanel, resolution, ch_muls, z_dim, dropout)
-    
-    def reparameterize(self, mu, logvar):
-        # log(var^2) = 2 * log(var) -> var = exp(0.5 * log(var^2))
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
+        self.encoder = Encoder(ch_in, bs_chanel, resolution, ch_muls, dropout)
+        self.decoder = Decoder(ch_in, bs_chanel, resolution, ch_muls, dropout)
             
     def forward(self, x):
-        mu, logvar = self.encoder(x)
-        z = self.reparameterize(mu, logvar)
-        x_hat = self.decoder(z)
-        return x_hat, mu, logvar
+        z = self.encoder(x)
+        x_rec = self.decoder(z)
+        return x_rec
 
 def test():
     # test the encoder
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     encoder = Encoder().to(device)
     x = torch.randn(2, 3, 256, 256).to(device)
-    mu, logvar = encoder(x)
+    z = encoder(x)
     decoder = Decoder().to(device)
-    x_hat = decoder(mu)
+    x_hat = decoder(z)
     print(x_hat.shape)
-    print(mu.shape, logvar.shape)
+    print(z.shape)
     import time
     from tqdm import tqdm
     tic = time.time()
@@ -182,9 +163,10 @@ def test():
     decoder.train()
     for i in tqdm(range(epoch)):
         x = torch.randn(batch, 3, 256, 256).to(device)
-        mu,log_var = encoder(x)
-        x_hat = decoder(mu)
+        z = encoder(x)
+        x_hat = decoder(z)
         loss = F.mse_loss(x, x_hat)
+        print(loss)
         loss.backward()
     toc = time.time()
     print("time: ", toc - tic)
