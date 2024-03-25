@@ -36,6 +36,8 @@ from utils.utils import DictToObject
 # image log method
 @torch.no_grad()
 def log_recons_image(datasetname, name, x, x_rec, steps, writer):
+    x = x[0:4, :, :, :]
+    x_rec = x_rec[0:4, :, :, :]
     mean, std = getNormalizeParameter(datasetname)
     std1 = torch.tensor(std).view(1, -1, 1, 1).cuda()
     mean1 = torch.tensor(mean).view(1, -1, 1, 1).cuda()
