@@ -308,8 +308,12 @@ def main(args):
             train_one_epoch(model, optimizer, lpips, train_dataloader,
                         data_config, train_config, accelerator, writer, logger, epoch)
         scheduler.step()
-        loss = validation_one_epoch(
-            model, lpips, val_dataloader, data_config, train_config, accelerator, writer, logger, epoch)
+        if train_config.f_distortion:
+            loss = validation_one_epoch(
+                model, lpips, val_dataloader, data_config, train_config, accelerator, writer, logger, epoch, low_freq_substitution)
+        else:
+            loss = validation_one_epoch(
+                model, lpips, val_dataloader, data_config, train_config, accelerator, writer, logger, epoch)
         writer.add_scalar(
             'train/lr', optimizer.param_groups[0]['lr'], epoch*len(train_dataloader))
         writer.add_scalar(
