@@ -24,3 +24,6 @@ train_config:
   lr_decay_rate: 4.0e-1
   epochs: 800
   print_freq: 10
+  f_distortion: True
+  f_alpha: 0.1
+  f_beta: 1

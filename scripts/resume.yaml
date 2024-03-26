@@ -6,12 +6,15 @@
 # FilePath: /FreqDefense/scripts/train.py
 
 resume: True
-resume_result: '2024_03_25_19_53_48'
+resume_result: '2024_03_26_10_56_04'
 random_seed: 981217
 train_config:
   distributed: False
-  lr: 2.0e-6
+  lr: 2.0e-4
   lr_decay_step: 200
   lr_decay_rate: 4.0e-1
   epochs: 800
   print_freq: 10
+  f_distortion: True
+  f_alpha: 0.1
+  f_beta: 1
