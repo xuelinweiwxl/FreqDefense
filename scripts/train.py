@@ -46,8 +46,7 @@ def log_recons_image(datasetname, name, imagelist, steps, writer):
     for i, img in enumerate(imagelist):
         img = img[0:4, :, :, :]
         img = img * std1 + mean1
-        # img_total = torch.cat([img_total, img], dim=0).clamp(0, 1)
-        img_total = torch.cat([img_total, img], dim=0)
+        img_total = torch.cat([img_total, img], dim=0).clamp(0, 1)
     img = make_grid(img_total, 4)
     writer.add_image(name, img, steps)
     writer.flush()
@@ -302,7 +301,7 @@ def main(args):
         if train_config.f_distortion:
             idx = random.randint(0, len(train_dataloader.dataset)-1)
             low_freq_image = train_dataloader.dataset[idx][0]
-            log_recons_image(data_config.dataset_name, 'test/low_freq_image', [low_freq_image.unsqueeze(0).cuda()], epoch
+            log_recons_image(data_config.dataset_name, 'train/low_freq_image', [low_freq_image.unsqueeze(0).cuda()], epoch
                          ,writer)
             low_freq_substitution.update(low_freq_image)
             low_freq_substitution = accelerator.prepare(low_freq_substitution)
