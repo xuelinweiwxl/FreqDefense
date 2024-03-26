@@ -38,16 +38,16 @@ from models.frae import FRAE
 
 # image log method
 @torch.no_grad()
-def log_recons_image(datasetname, name, x, x_rec, steps, writer):
-    x = x[0:4, :, :, :]
-    x_rec = x_rec[0:4, :, :, :]
+def log_recons_image(datasetname, name, imagelist, steps, writer):
     mean, std = getNormalizeParameter(datasetname)
     std1 = torch.tensor(std).view(1, -1, 1, 1).cuda()
     mean1 = torch.tensor(mean).view(1, -1, 1, 1).cuda()
-    x_rec = x_rec * std1 + mean1  # [B, C, H, W]
-    x = x * std1 + mean1
-    img = torch.cat([x, x_rec], dim=0).clamp(0, 1)
-    img = make_grid(img, x.size(0))
+    img_total = torch.tensor([]).cuda()
+    for i, img in enumerate(imagelist):
+        img = img[0:4, :, :, :]
+        img = img * std1 + mean1
+        img_total = torch.cat([img_total, img], dim=0).clamp(0, 1)
+    img = make_grid(img_total, 4)
     writer.add_image(name, img, steps)
     writer.flush()
 
@@ -65,9 +65,10 @@ def train_one_epoch(model, optimizer, lpips, train_dataloader, data_config, trai
                 raise Exception("low_freq_substitution is None")
             img_f = low_freq_substitution(img)
             if i % print_steps == 0:
-                log_recons_image(data_config.dataset_name, 'train/f_distortion', img, img_f, global_steps, writer)
-            img = img_f
-        output = model(img)
+                log_recons_image(data_config.dataset_name, 'train/f_distortion', [img, img_f], global_steps, writer)
+            output = model(img_f)
+        else:
+            output = model(img)
         lpips_loss = lpips(output, img).mean()
         # check if the loss is nan
         if torch.isnan(lpips_loss).any():
@@ -89,20 +90,24 @@ def train_one_epoch(model, optimizer, lpips, train_dataloader, data_config, trai
                 writer.add_scalar('train/lpips_loss',
                                   lpips_loss.mean().item(), global_steps)
                 log_recons_image(data_config.dataset_name,
-                                 'train/recons', img, output, global_steps, writer)
+                                 'train/recons', [img, output], global_steps, writer)
 
 
-def validation_one_epoch(model, lpips, val_dataloader, data_config, train_config, accelerator, writer, logger, cur_epoch):
+def validation_one_epoch(model, lpips, val_dataloader, data_config, train_config, accelerator, writer, logger, cur_epoch, low_freq_substitution=None):
     device = accelerator.device
     model.eval()
-    lpips = lpips.to(device)
     total_loss, total_l1_loss, total_lpips_loss, item = torch.zeros(
         4).to(device)
 
     with torch.no_grad():
         for _, (img, _) in tqdm(enumerate(val_dataloader)):
-            img = img.to(device)
-            output = model(img)
+            if train_config.f_distortion:
+                if low_freq_substitution is None:
+                    raise Exception("low_freq_substitution is None")
+                img_f = low_freq_substitution(img)
+                output = model(img_f)
+            else:
+                output = model(img)
             lpips_loss = lpips(output, img).mean()
             loss_l1 = (img - output).abs().mean()
             loss = lpips_loss + loss_l1
@@ -134,7 +139,7 @@ def validation_one_epoch(model, lpips, val_dataloader, data_config, train_config
             writer.add_scalar('val/total_lpips_loss',
                               total_lpips_loss, cur_epoch)
             log_recons_image(data_config.dataset_name,
-                             'val/recons', img, output, cur_epoch, writer)
+                             'val/recons', [img, img_f, output], cur_epoch, writer)
     return total_loss
 
 
@@ -191,7 +196,7 @@ def main(args):
 
         # logger setting
         logger.remove()
-        logger.add(os.path.join(args.result_dir, 'log.txt'), level='DEBUG')
+        logger.add(os.path.join(args.result_dir, 'log.txt'))
         logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 
         # objectify config
@@ -283,10 +288,7 @@ def main(args):
         idx = random.randint(0, len(train_dataloader.dataset)-1)
         low_freq_image = train_dataloader.dataset[idx][0].to(accelerator.device)
         low_freq_substitution = Low_freq_substitution(
-            resolution, resolution, low_freq_image, train_config.f_alpha, train_config.f_beta)
-    else:
-        low_freq_substitution = None
-
+            resolution, resolution, ch_in, low_freq_image, data_config.batch_size, train_config.f_alpha, train_config.f_beta)
     # prepare model and etc with accelerator
     model, optimizer, train_dataloader, val_dataloader, lpips = accelerator.prepare(
         model, optimizer, train_dataloader, val_dataloader, lpips)
