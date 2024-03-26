@@ -47,12 +47,11 @@ class Low_freq_substitution(nn.Module):
         max_radius = min(
             center[0], center[1], input_height-center[0], input_width-center[1])
         radius = max_radius*alpha
-        mask = torch.zeros(input_height, input_width)
+        mask = torch.zeros(channel, input_height, input_width)
         for i in range(input_height):
             for j in range(input_width):
                 if (i-center[0])**2 + (j-center[1])**2 <= radius**2:
-                    mask[i][j] = 1
-        mask = mask.unsqueeze(0).repeat_interleave(channel, dim=0)
+                    mask[:,i,j] = 1
         mask = mask.unsqueeze(0).repeat_interleave(batch_size, dim=0)
         low_freq_image_fft_amplitude = low_freq_image_fft_amplitude.unsqueeze(0).repeat_interleave(batch_size, dim=0)
         self.register_buffer('mask', mask)
@@ -68,8 +67,6 @@ class Low_freq_substitution(nn.Module):
         self.low_freq_image_phase = torch.angle(low_freq_image_fft)
         self.low_freq_image_fft_amplitude = self.low_freq_image_fft_amplitude.unsqueeze(0).repeat_interleave(self.batch_size, dim=0)
 
-        
-    
     # replace the low frequency part of the image with the low frequency part of a random image
     def forward(self, tensor: Tensor) -> Tensor:
         # get the amplitude and phase of the input image
@@ -85,7 +82,10 @@ class Low_freq_substitution(nn.Module):
         tensor_fft = torch.polar(tensor_amplitude, tensor_phase)
         tensor_fft = ifftshift(tensor_fft, dim=(-2, -1))
         tensor = ifft2(tensor_fft, dim=(-2, -1))
-        tensor = torch.abs(tensor)
+
+        # *************** very important *************
+        # if this return abs, the result will be wrong
+        tensor = torch.real(tensor)
         return tensor
 
     def __call__(self, tensor: Tensor) -> Tensor:
@@ -107,20 +107,29 @@ def test():
     # transform the image
     transform = T.Compose([
         T.Resize((256, 256)),
-        T.ToTensor()
+        T.ToTensor(),
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+    denormalize = T.Compose([
+        T.Normalize(mean=[0., 0., 0.], std=[1/0.229, 1/0.224, 1/0.225]),
+        T.Normalize(mean=[-0.485, -0.456, -0.406], std=[1., 1., 1.]),
     ])
     img = transform(img).unsqueeze(0)
+    lw = Image.open('../data/20-imagenet/train/n02860847/n02860847_8.JPEG')
     lw = torch.zeros(3, 256, 256)
-    lows = Low_freq_substitution(256, 256, lw, 0.01)
+    lows = Low_freq_substitution(256, 256, 3, lw, 1, 0.1, 1)
+    lows.update(lw)
     o = lows(img)
     print(o.shape)
     print(img[0,0,:,:])
     print(o[0,0,:,:])
     # show the image from one batch
     import matplotlib.pyplot as plt
-    plt.imshow(img[0,:,:,:].permute(1,2,0))
+    a = denormalize(img[0,:,:,:]).permute(1,2,0)
+    b = denormalize(o[0,:,:,:]).permute(1,2,0)
+    plt.imshow(a.clamp(0,1))
     plt.show()
-    plt.imshow(o[0,:,:,:].permute(1,2,0))
+    plt.imshow(b.clamp(0,1))
     plt.show()
 
 if __name__ == '__main__':
