@@ -25,5 +25,5 @@ train_config:
   epochs: 800
   print_freq: 10
   f_distortion: True
-  f_alpha: 0.1
+  f_alpha: 0
   f_beta: 1
