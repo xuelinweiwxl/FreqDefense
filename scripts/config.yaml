@@ -15,12 +15,12 @@ data_config:
   num_workers: 4
 model_config:
   bs_chanel: 64
-  dropout: 0.0
+  dropout: 0.2
   d_factor: 6
 train_config:
   distributed: False
-  lr: 2.0e-5
+  lr: 2.0e-4
   lr_decay_step: 200
   lr_decay_rate: 4.0e-1
-  epochs: 100
+  epochs: 800
   print_freq: 10
