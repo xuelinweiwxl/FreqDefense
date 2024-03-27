@@ -9,7 +9,7 @@ resume: False
 random_seed: 981217
 # result_name: 'test2'
 data_config:
-  dataset_name: '20-imagenet'
+  dataset_name: 'celeba'
   data_root: './data/'
   batch_size: 32
   num_workers: 4
@@ -19,7 +19,7 @@ model_config:
   d_factor: 6
 train_config:
   distributed: False
-  lr: 2.0e-4
+  lr: 2.0e-5
   lr_decay_step: 200
   lr_decay_rate: 4.0e-1
   epochs: 800

@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 14:56:44
-LastEditTime: 2024-03-25 15:00:29
+LastEditTime: 2024-03-27 20:40:16
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/datasets/datautils.py
 '''
@@ -21,6 +21,8 @@ def getNormalizeParameter(datasetname):
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     if datasetname == 'imagenet':
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+    if datasetname == 'celeba':
+        return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
     else:
         raise Exception('unknown dataset')
 
@@ -29,32 +31,21 @@ def getImgaeSize(datasetname):
         return 3, 256
     if datasetname == 'imagenet':
         return 3, 256
+    if datasetname == 'celeba':
+        return 3, 256
     else:
         raise Exception('unknown dataset')
 
 def getTransforms(datasetname):
-    if datasetname == '20-imagenet':
-        mean, std = getNormalizeParameter(datasetname)
-        _, size = getImgaeSize(datasetname)
-        trans = T.Compose([
-            T.Resize(size),
-            T.CenterCrop(size),
-            T.ToTensor(),
-            T.Normalize(mean, std)
-        ])
-        return trans
-    elif datasetname == 'imagenet':
-        mean, std = getNormalizeParameter(datasetname)
-        _, size = getImgaeSize(datasetname)
-        trans = T.Compose([
-            T.Resize(size),
-            T.CenterCrop(size),
-            T.ToTensor(),
-            T.Normalize(mean, std)
-        ])
-        return trans
-    else:
-        raise Exception('unknown dataset')
+    mean, std = getNormalizeParameter(datasetname)
+    _, size = getImgaeSize(datasetname)
+    trans = T.Compose([
+        T.Resize(size),
+        T.CenterCrop(size),
+        T.ToTensor(),
+        T.Normalize(mean, std)
+    ])
+    return trans
 
 def getDataSet(datasetname, root, train=True):
     if datasetname == '20-imagenet':
@@ -77,6 +68,16 @@ def getDataSet(datasetname, root, train=True):
             assert os.path.exists(root), f'path {root} not exists'
             dataset = ImageFolder(root, transform=getTransforms(datasetname))
         return dataset
+    if datasetname == 'celeba':
+        if train:
+            root = root + '/celeba/train'
+            assert os.path.exists(root), f'path {root} not exists'
+            dataset = ImageFolder(root, transform=getTransforms(datasetname))
+        else:
+            root = root + '/celeba/test'
+            assert os.path.exists(root), f'path {root} not exists'
+            dataset = ImageFolder(root, transform=getTransforms(datasetname))
+        return dataset
     else:
         raise Exception('unknown dataset') 
 
@@ -86,13 +87,13 @@ def getDataloader(datasetname, root, batch_size, num_works=4, train=True):
     return dataloader
 
 def test():
-    datasetname = '20-imagenet'
+    datasetname = 'celeba'
     root = '../data'
-    dataloader = getDataloader(datasetname, root, 64, 4, True)
-    testdataloader = getDataloader(datasetname, root, 64, 4, False)
+    dataloader = getDataloader(datasetname, root, 200, 4, True)
+    testdataloader = getDataloader(datasetname, root, 200, 4, False)
     print(len(dataloader.dataset), len(testdataloader.dataset))
     from tqdm import tqdm
     for x, y in tqdm(dataloader):
-        print(x.shape, y.shape, end='\r')
+        pass
 if __name__ == '__main__':
     test()

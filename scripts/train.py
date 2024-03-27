@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 15:37:34
-LastEditTime: 2024-03-25 19:04:35
+LastEditTime: 2024-03-27 20:47:54
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/train.py
 '''
@@ -64,8 +64,6 @@ def train_one_epoch(model, optimizer, lpips, train_dataloader, data_config, trai
             if low_freq_substitution is None:
                 raise Exception("low_freq_substitution is None")
             img_f = low_freq_substitution(img)
-            if i % print_steps == 0:
-                log_recons_image(data_config.dataset_name, 'train/f_distortion', [img, img_f], global_steps, writer)
             output = model(img_f)
         else:
             output = model(img)
@@ -89,7 +87,10 @@ def train_one_epoch(model, optimizer, lpips, train_dataloader, data_config, trai
                 writer.add_scalar('train/loss', loss.item(), global_steps)
                 writer.add_scalar('train/lpips_loss',
                                   lpips_loss.mean().item(), global_steps)
-                log_recons_image(data_config.dataset_name,
+                if train_config.f_distortion:
+                    log_recons_image(data_config.dataset_name, 'train/f_distortion', [img, img_f, output], global_steps, writer)
+                else:
+                    log_recons_image(data_config.dataset_name,
                                  'train/recons', [img, output], global_steps, writer)
 
 
