@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-25 10:36:30
-LastEditTime: 2024-03-25 10:36:44
+LastEditTime: 2024-03-28 23:24:55
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/utils/utils.py
 '''
@@ -12,6 +12,8 @@ from torch import Tensor
 import torch
 from torch.fft import fft2, ifft2, fftshift, ifftshift
 import torch.nn as nn
+import matplotlib.pyplot as plt
+import numpy as np
 
 class DictToObject:
     def __init__(self, dictionary):
@@ -93,8 +95,6 @@ class Low_freq_substitution(nn.Module):
 
     def __repr__(self) -> str:
         return f"low_freq_substitution(alpha={self.alpha}, beta={self.beta})"
-
-
 
 def test():
     from PIL import Image
