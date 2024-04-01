@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 14:56:44
-LastEditTime: 2024-03-27 20:40:16
+LastEditTime: 2024-04-01 16:41:06
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/datasets/datautils.py
 '''
@@ -20,7 +20,7 @@ def getNormalizeParameter(datasetname):
     if datasetname == '20-imagenet':
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     if datasetname == 'imagenet':
-        return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+        return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
     if datasetname == 'celeba':
         return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
     else:
@@ -58,13 +58,13 @@ def getDataSet(datasetname, root, train=True):
             assert os.path.exists(root), f'path {root} not exists'
             dataset = ImageFolder(root, transform=getTransforms(datasetname))
         return dataset
-    if datasetname == 'imagnet':
+    if datasetname == 'imagenet':
         if train:
-            root = root + '/imagnet/train'
+            root = root + '/imagenet/train'
             assert os.path.exists(root), f'path {root} not exists'
             dataset = ImageFolder(root, transform=getTransforms(datasetname))
         else:
-            root = root + '/imagnet/val'
+            root = root + '/imagenet/val'
             assert os.path.exists(root), f'path {root} not exists'
             dataset = ImageFolder(root, transform=getTransforms(datasetname))
         return dataset

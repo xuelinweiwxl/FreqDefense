@@ -9,9 +9,9 @@ resume: False
 random_seed: 981217
 # result_name: 'test2'
 data_config:
-  dataset_name: 'celeba'
+  dataset_name: 'imagenet'
   data_root: './data/'
-  batch_size: 32
+  batch_size: 16
   num_workers: 4
 model_config:
   bs_chanel: 64
