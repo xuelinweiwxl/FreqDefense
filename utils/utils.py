@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-25 10:36:30
-LastEditTime: 2024-03-28 23:24:55
+LastEditTime: 2024-04-01 15:57:41
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/utils/utils.py
 '''
@@ -95,6 +95,61 @@ class Low_freq_substitution(nn.Module):
 
     def __repr__(self) -> str:
         return f"low_freq_substitution(alpha={self.alpha}, beta={self.beta})"
+    
+class addRayleigh_noise(nn.Module):
+    def __init__(self, input_height, input_width, channel, batch_size, alpha=0.15, scale=1):
+        super(addRayleigh_noise, self).__init__()
+        _log_api_usage_once(self)
+        
+        self.alpha = alpha
+        self.input_height = input_height
+        self.input_width = input_width
+        self.channel = channel
+        self.batch_size = batch_size
+        self.scale = scale
+
+        center = ((input_height-1)/2, (input_width-1)/2)
+        max_radius = min(
+            center[0], center[1], input_height-center[0], input_width-center[1])
+        radius = max_radius*alpha
+        mask = torch.zeros(channel, input_height, input_width)
+        for i in range(input_height):
+            for j in range(input_width):
+                if (i-center[0])**2 + (j-center[1])**2 >= radius**2:
+                    mask[:,i,j] = 1
+        mask = mask.unsqueeze(0).repeat_interleave(batch_size, dim=0)
+        self.register_buffer('mask', mask)
+
+    def forward(self, tensor: Tensor) -> Tensor:
+        # get the amplitude and phase of the input image
+        tensor_fft = fft2(tensor, dim=(-2, -1))
+        tensor_fft = fftshift(tensor_fft, dim=(-2, -1))
+        tensor_amplitude = torch.abs(tensor_fft)
+        tensor_phase = torch.angle(tensor_fft)
+        
+        # generate the noise
+        noise = np.random.rayleigh(self.scale, tensor.shape)
+        noise = torch.tensor(noise, dtype=torch.float32)
+        noise = noise.to(tensor.device)
+        
+        tensor_amplitude = self.mask * noise + \
+            (torch.ones_like(self.mask)-self.mask) * tensor_amplitude
+
+        # get the new image tensor
+        tensor_fft = torch.polar(tensor_amplitude, tensor_phase)
+        tensor_fft = ifftshift(tensor_fft, dim=(-2, -1))
+        tensor = ifft2(tensor_fft, dim=(-2, -1))
+
+        # *************** very important *************
+        # if this return abs, the result will be wrong
+        tensor = torch.real(tensor)
+        return tensor
+    
+    def __call__(self, tensor: Tensor) -> Tensor:
+        return self.forward(tensor)
+
+    def __repr__(self) -> str:
+        return f"low_freq_substitution(alpha={self.alpha}, beta={self.beta})"
 
 def test():
     from PIL import Image
@@ -103,7 +158,7 @@ def test():
     import torch
 
     # load the image
-    img = Image.open('../data/20-imagenet/train/n01630670/n01630670_6.JPEG')
+    img = Image.open('../data/20-imagenet/train/n02948072/n02948072_1073.JPEG')
     # transform the image
     transform = T.Compose([
         T.Resize((256, 256)),
@@ -117,9 +172,12 @@ def test():
     img = transform(img).unsqueeze(0)
     lw = Image.open('../data/20-imagenet/train/n02860847/n02860847_8.JPEG')
     lw = torch.zeros(3, 256, 256)
-    lows = Low_freq_substitution(256, 256, 3, lw, 1, 0.1, 1)
+    alpha = 0.1
+    lows = Low_freq_substitution(256, 256, 3, lw, 1, alpha, 1)
+    high = addRayleigh_noise(256, 256, 3, 1, alpha, 80)
     lows.update(lw)
     o = lows(img)
+    o = high(o)
     print(o.shape)
     print(img[0,0,:,:])
     print(o[0,0,:,:])
