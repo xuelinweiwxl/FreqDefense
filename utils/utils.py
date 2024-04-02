@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-25 10:36:30
-LastEditTime: 2024-04-01 15:57:41
+LastEditTime: 2024-04-02 10:32:43
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/utils/utils.py
 '''
@@ -14,6 +14,7 @@ from torch.fft import fft2, ifft2, fftshift, ifftshift
 import torch.nn as nn
 import matplotlib.pyplot as plt
 import numpy as np
+from copy import deepcopy
 
 class DictToObject:
     def __init__(self, dictionary):
@@ -54,8 +55,6 @@ class Low_freq_substitution(nn.Module):
             for j in range(input_width):
                 if (i-center[0])**2 + (j-center[1])**2 <= radius**2:
                     mask[:,i,j] = 1
-        mask = mask.unsqueeze(0).repeat_interleave(batch_size, dim=0)
-        low_freq_image_fft_amplitude = low_freq_image_fft_amplitude.unsqueeze(0).repeat_interleave(batch_size, dim=0)
         self.register_buffer('mask', mask)
         self.register_buffer('low_freq_image_fft_amplitude', low_freq_image_fft_amplitude)
         
@@ -67,7 +66,6 @@ class Low_freq_substitution(nn.Module):
         low_freq_image_fft = fftshift(low_freq_image_fft, dim=(-2, -1))
         self.low_freq_image_fft_amplitude = torch.abs(low_freq_image_fft)
         self.low_freq_image_phase = torch.angle(low_freq_image_fft)
-        self.low_freq_image_fft_amplitude = self.low_freq_image_fft_amplitude.unsqueeze(0).repeat_interleave(self.batch_size, dim=0)
 
     # replace the low frequency part of the image with the low frequency part of a random image
     def forward(self, tensor: Tensor) -> Tensor:
@@ -76,9 +74,14 @@ class Low_freq_substitution(nn.Module):
         tensor_fft = fftshift(tensor_fft, dim=(-2, -1))
         tensor_amplitude = torch.abs(tensor_fft)
         tensor_phase = torch.angle(tensor_fft)
-        
-        tensor_amplitude = self.beta * self.mask * self.low_freq_image_fft_amplitude + \
-            (torch.ones_like(self.mask)-self.mask) * tensor_amplitude
+
+        mask = self.mask.clone()
+        low_freq_image_fft_amplitude = self.low_freq_image_fft_amplitude.clone()
+        mask = mask.unsqueeze(0).repeat_interleave(tensor.shape[0], dim=0)
+        low_freq_image_fft_amplitude = low_freq_image_fft_amplitude.unsqueeze(0).repeat_interleave(tensor.shape[0], dim=0)
+
+        tensor_amplitude = self.beta * mask * low_freq_image_fft_amplitude + \
+            (torch.ones_like(mask)-mask) * tensor_amplitude
 
         # get the new image tensor
         tensor_fft = torch.polar(tensor_amplitude, tensor_phase)
@@ -117,7 +120,6 @@ class addRayleigh_noise(nn.Module):
             for j in range(input_width):
                 if (i-center[0])**2 + (j-center[1])**2 >= radius**2:
                     mask[:,i,j] = 1
-        mask = mask.unsqueeze(0).repeat_interleave(batch_size, dim=0)
         self.register_buffer('mask', mask)
 
     def forward(self, tensor: Tensor) -> Tensor:
@@ -131,9 +133,11 @@ class addRayleigh_noise(nn.Module):
         noise = np.random.rayleigh(self.scale, tensor.shape)
         noise = torch.tensor(noise, dtype=torch.float32)
         noise = noise.to(tensor.device)
+
+        mask = self.mask.clone()
+        mask = mask.unsqueeze(0).repeat_interleave(tensor.shape[0], dim=0)
         
-        tensor_amplitude = self.mask * noise + \
-            (torch.ones_like(self.mask)-self.mask) * tensor_amplitude
+        tensor_amplitude = self.mask * noise + tensor_amplitude
 
         # get the new image tensor
         tensor_fft = torch.polar(tensor_amplitude, tensor_phase)
@@ -156,12 +160,13 @@ def test():
     import torchvision.transforms as T
     import numpy as np
     import torch
-
+    size = 256
     # load the image
-    img = Image.open('../data/20-imagenet/train/n02948072/n02948072_1073.JPEG')
+    img = Image.open('/data/wxl/code/FreqDefense/test.png')
+    img = Image.open('/data/wxl/code/FreqDefense/data/20-imagenet/train/n03404251/n03404251_530.JPEG')
     # transform the image
     transform = T.Compose([
-        T.Resize((256, 256)),
+        T.Resize((size, size)),
         T.ToTensor(),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -171,24 +176,27 @@ def test():
     ])
     img = transform(img).unsqueeze(0)
     lw = Image.open('../data/20-imagenet/train/n02860847/n02860847_8.JPEG')
-    lw = torch.zeros(3, 256, 256)
+    lw = torch.zeros(3, size, size)
     alpha = 0.1
-    lows = Low_freq_substitution(256, 256, 3, lw, 1, alpha, 1)
-    high = addRayleigh_noise(256, 256, 3, 1, alpha, 80)
-    lows.update(lw)
-    o = lows(img)
-    o = high(o)
-    print(o.shape)
-    print(img[0,0,:,:])
-    print(o[0,0,:,:])
-    # show the image from one batch
-    import matplotlib.pyplot as plt
-    a = denormalize(img[0,:,:,:]).permute(1,2,0)
-    b = denormalize(o[0,:,:,:]).permute(1,2,0)
-    plt.imshow(a.clamp(0,1))
-    plt.show()
-    plt.imshow(b.clamp(0,1))
-    plt.show()
+    # lows = Low_freq_substitution(size, size, 3, lw, 1, alpha, 1)
+    for i in range(1,20):
+        scale = i*10
+        high = addRayleigh_noise(size, size, 3, 1, alpha, scale)
+        # lows.update(lw)
+        # o = lows(img)
+        o = high(img)
+        # print(o.shape)
+        # print(img[0,0,:,:])
+        # print(o[0,0,:,:])
+        # show the image from one batch
+        import matplotlib.pyplot as plt
+        a = denormalize(img[0,:,:,:]).permute(1,2,0)
+        b = denormalize(o[0,:,:,:]).permute(1,2,0)
+        print(scale)
+        plt.imshow(a.clamp(0,1))
+        plt.show()
+        plt.imshow(b.clamp(0,1))
+        plt.show()
 
 if __name__ == '__main__':
     test()

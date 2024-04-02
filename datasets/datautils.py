@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 14:56:44
-LastEditTime: 2024-04-01 16:41:06
+LastEditTime: 2024-04-01 20:11:03
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/datasets/datautils.py
 '''
@@ -12,7 +12,7 @@ If you need to load your own dataset, all parameter related to the dataset shoul
 '''
 
 import os
-from torchvision.datasets import ImageFolder
+from torchvision.datasets import ImageFolder, CIFAR10
 from torchvision.transforms import transforms as T
 from torch.utils.data import DataLoader
 
@@ -23,22 +23,26 @@ def getNormalizeParameter(datasetname):
         return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
     if datasetname == 'celeba':
         return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+    if datasetname == 'cifar10':
+        return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
     else:
         raise Exception('unknown dataset')
 
-def getImgaeSize(datasetname):
+def getImageSize(datasetname):
     if datasetname == '20-imagenet':
         return 3, 256
     if datasetname == 'imagenet':
         return 3, 256
     if datasetname == 'celeba':
         return 3, 256
+    if datasetname == 'cifar10':
+        return 3, 32
     else:
         raise Exception('unknown dataset')
 
 def getTransforms(datasetname):
     mean, std = getNormalizeParameter(datasetname)
-    _, size = getImgaeSize(datasetname)
+    _, size = getImageSize(datasetname)
     trans = T.Compose([
         T.Resize(size),
         T.CenterCrop(size),
@@ -78,6 +82,9 @@ def getDataSet(datasetname, root, train=True):
             assert os.path.exists(root), f'path {root} not exists'
             dataset = ImageFolder(root, transform=getTransforms(datasetname))
         return dataset
+    if datasetname == 'cifar10':
+        dataset = CIFAR10(root, train=train, transform=getTransforms(datasetname), download=True)
+        return dataset
     else:
         raise Exception('unknown dataset') 
 
@@ -87,13 +94,23 @@ def getDataloader(datasetname, root, batch_size, num_works=4, train=True):
     return dataloader
 
 def test():
-    datasetname = 'celeba'
+    datasetname = 'cifar10'
     root = '../data'
     dataloader = getDataloader(datasetname, root, 200, 4, True)
     testdataloader = getDataloader(datasetname, root, 200, 4, False)
     print(len(dataloader.dataset), len(testdataloader.dataset))
     from tqdm import tqdm
+    toPIL = T.ToPILImage()
+    trans = T.Compose([
+        T.Resize(32),
+        T.CenterCrop(32),
+        T.ToTensor()
+    ])
+    dataloader.dataset.transform = trans
     for x, y in tqdm(dataloader):
-        pass
+        x = x[101,:,:,:]
+        x = toPIL(x)
+        x.save('../test.png')
+        break
 if __name__ == '__main__':
     test()

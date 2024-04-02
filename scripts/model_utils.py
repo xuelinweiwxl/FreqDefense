@@ -13,7 +13,7 @@ import torch
 import sys
 sys.path.append("..")
 
-from datasets.datautils import getImgaeSize
+from datasets.datautils import getImageSize
 from models.frae import FRAE
 
 
@@ -45,7 +45,7 @@ def load_model(result_path, device, best=True):
     model_config = checkpoint['model_config']
     model_state = checkpoint['model']
     print("Load the best model from %s" % result_path)
-    ch_in, resolution = getImgaeSize(data_config.dataset_name)
+    ch_in, resolution = getImageSize(data_config.dataset_name)
     print(f"Note: the input dimension is {ch_in} x {resolution} x {resolution}")
     if 'd_factor' in model_config.__dict__:
         if model_config.d_factor:

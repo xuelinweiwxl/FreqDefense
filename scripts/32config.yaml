@@ -9,25 +9,25 @@ resume: False
 random_seed: 981217
 # result_name: 'test2'
 data_config:
-  dataset_name: 'imagenet'
+  dataset_name: 'cifar10'
   data_root: './data/'
-  batch_size: 32
-  num_workers: 4
+  batch_size: 256
+  num_workers: 8
 model_config:
   bs_chanel: 64
   dropout: 0.2
   # d_factor can not greater than log2(resolution)
-  d_factor: 6
+  d_factor: 4
 train_config:
   distributed: False
-  lr: 2.0e-5
-  lr_decay_step: 200
-  lr_decay_rate: 4.0e-1
-  epochs: 800
+  lr: 2.0e-6
+  lr_decay_step: 1000
+  lr_decay_rate: 5.0e-1
+  epochs: 2000
   print_freq: 4
   f_distortion: True
   f_alpha: 0.1
   f_beta: 1
-  f_scale: 80
+  f_scale: 20
   ffl_loss: True
-  ffl_weight: 1.0
+  ffl_weight: 10.0

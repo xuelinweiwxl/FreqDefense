@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 15:37:34
-LastEditTime: 2024-04-01 16:53:31
+LastEditTime: 2024-04-02 15:52:35
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/train.py
 '''
@@ -29,7 +29,7 @@ sys.path.append(".")
 sys.path.append("..")
 
 from utils.utils import DictToObject, Low_freq_substitution, addRayleigh_noise
-from datasets.datautils import getDataloader, getImgaeSize, getNormalizeParameter
+from datasets.datautils import getDataloader, getImageSize, getNormalizeParameter
 from models.frae import FRAE
 
 ######################################################################
@@ -59,7 +59,7 @@ def log_recons_image(datasetname, name, imagelist, steps, writer):
 def train_one_epoch(model, optimizer, lpips, FFL, train_dataloader, data_config, train_config, accelerator, writer, logger, cur_epoch, low_freq_substitution=None, high_noise=None):
     model.train()
     print_steps = len(train_dataloader) // train_config.print_freq
-    _, size = getImgaeSize(data_config.dataset_name)
+    _, size = getImageSize(data_config.dataset_name)
 
     for i, (img, _) in tqdm(enumerate(train_dataloader)):
         optimizer.zero_grad()
@@ -74,28 +74,34 @@ def train_one_epoch(model, optimizer, lpips, FFL, train_dataloader, data_config,
             # augment the image
             all_img = torch.cat([img_f, img], dim=0)
             output = model(all_img)
+            correct_img = torch.cat([img, img], dim=0)
         else:
             all_img = img
+            correct_img = img
             output = model(img)
-        loss_lpips = lpips(output, all_img).mean()
+        
+        loss_lpips = lpips(output, correct_img).mean()
         # check if the loss is nan
         if torch.isnan(loss_lpips).any():
             logger.error(f"Loss is nan at epoch {cur_epoch}, iteration {i}")
             raise Exception("Loss is nan")
+        
         # check the shape of the loss
-        loss_l1 = (all_img - output).abs().mean()
+        loss_l1 = (correct_img - output).abs().mean()
+
         if train_config.ffl_loss:
-            loss_ffl = FFL(output, torch.cat([img, img], dim=0))
+            loss_ffl = FFL(output, correct_img, dim=0)
             loss = loss_lpips + loss_l1 + loss_ffl
         else:
             loss = loss_lpips + loss_l1
+        
         accelerator.backward(loss)
         optimizer.step()
 
         if accelerator.is_main_process:
             if i % print_steps == 0:
                 logger.info(
-                    f'Epoch {cur_epoch}/{train_config.epochs}, iteration {i}/{len(train_dataloader)}, loss: {loss.item()}, l1 loss: {loss_l1.item()}, lpips loss: {loss_lpips.mean().item()}')
+                    f'Epoch {cur_epoch}/{train_config.epochs}, iteration {i}/{len(train_dataloader)}, loss: {loss.item()}, l1 loss: {loss_l1.item()}, lpips loss: {loss_lpips.mean().item()}, ffl loss: {loss_ffl.mean().item() if train_config.ffl_loss else 0.0}')
                 writer.add_scalar(
                     'train/l1_loss', loss_l1.item(), global_steps)
                 writer.add_scalar('train/loss', loss.item(), global_steps)
@@ -132,7 +138,7 @@ def validation_one_epoch(model, lpips, FFL, val_dataloader, data_config, train_c
             lpips_loss = lpips(output, img).mean()
             loss_l1 = (img - output).abs().mean()
             if train_config.ffl_loss:
-                loss_ffl = FFL(output, torch.cat([img, img], dim=0))
+                loss_ffl = FFL(output, img, dim=0)
                 loss_ffl.mean()
                 loss = lpips_loss + loss_l1 + loss_ffl
                 total_ffl_loss += loss_ffl.item() * img.shape[0]
@@ -166,7 +172,7 @@ def validation_one_epoch(model, lpips, FFL, val_dataloader, data_config, train_c
 
         if accelerator.is_main_process:
             logger.info(
-                f'Epoch {cur_epoch}/{train_config.epochs}, validation loss: {total_loss}, l1 loss: {total_l1_loss}, lpips loss: {total_lpips_loss}')
+                f'Epoch {cur_epoch}/{train_config.epochs}, validation loss: {total_loss}, l1 loss: {total_l1_loss}, lpips loss: {total_lpips_loss}, ffl loss: {total_ffl_loss if train_config.ffl_loss else 0.0}')
             writer.add_scalar('val/total_loss', total_loss, cur_epoch)
             writer.add_scalar('val/total_l1_loss', total_l1_loss, cur_epoch)
             writer.add_scalar('val/total_lpips_loss',
@@ -192,6 +198,21 @@ def main(args):
         raise Exception("config_path not found")
     logger.info("Config file loaded successfully")
 
+    # set random seed
+    if args.random_seed is not None:
+        random.seed(args.random_seed)
+        np.random.seed(args.random_seed)
+        torch.manual_seed(args.random_seed)
+        torch.cuda.manual_seed(args.random_seed)
+        torch.cuda.manual_seed_all(args.random_seed)
+    else:
+        random.seed(0)
+        np.random.seed(0)
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
+        torch.cuda.manual_seed_all(0)
+    logger.info(f"Random seed has been setted: {args.random_seed}")
+
     if 'resume' in args.__dict__ and args.resume:
         args.result_dir = os.path.join(args.result_dir, args.resume_result)
         args.resume_result = os.path.join(args.result_dir, 'last_model.pt')
@@ -205,7 +226,7 @@ def main(args):
             logger.info(f"{args.resume_result} loaded successfully")
             # logger setting
             logger.remove()
-            experiment_id = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            experiment_id = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M")
             logger.add(os.path.join(args.result_dir,
                        f'log_resume_{experiment_id}.txt'), level='DEBUG')
             logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
@@ -214,7 +235,7 @@ def main(args):
     else:
         # create result directory
         if not 'result_name' in args.__dict__:
-            experiment_id = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+            experiment_id = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M")
             args.result_dir = os.path.join(args.result_dir, experiment_id)
             if not os.path.exists(args.result_dir):
                 os.makedirs(args.result_dir)
@@ -239,21 +260,6 @@ def main(args):
         data_config = DictToObject(args.data_config)
         model_config = DictToObject(args.model_config)
         train_config = DictToObject(args.train_config)
-
-    # set random seed
-    if args.random_seed is not None:
-        random.seed(args.random_seed)
-        np.random.seed(args.random_seed)
-        torch.manual_seed(args.random_seed)
-        torch.cuda.manual_seed(args.random_seed)
-        torch.cuda.manual_seed_all(args.random_seed)
-    else:
-        random.seed(0)
-        np.random.seed(0)
-        torch.manual_seed(0)
-        torch.cuda.manual_seed(0)
-        torch.cuda.manual_seed_all(0)
-    logger.info(f"Random seed has been setted: {args.random_seed}")
 
     # distrubuted training and training device setting
     if 'distributed' in args.__dict__ and args.distributed:
@@ -286,7 +292,7 @@ def main(args):
     logger.info('Dataloader initialized successfully')
 
     # get model setting according to the dataset
-    ch_in, resolution = getImgaeSize(data_config.dataset_name)
+    ch_in, resolution = getImageSize(data_config.dataset_name)
     if 'd_factor' in model_config.__dict__:
         if model_config.d_factor:
             if model_config.d_factor == 6:
@@ -397,6 +403,6 @@ if __name__ == "__main__":
     parser.add_argument("--result_dir", type=str, default='./results',
                         help="path to save outputs (ckpt, tensorboard runs)")
     parser.add_argument("--config_path", type=str,
-                        default='./scripts/config.yaml', help="path to config file")
+                        default='./scripts/32config.yaml', help="path to config file")
     args = parser.parse_args()
     main(args)
