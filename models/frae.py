@@ -138,8 +138,20 @@ class FRAE(nn.Module):
         super().__init__()
         self.encoder = Encoder(ch_in, bs_chanel, resolution, ch_muls, dropout)
         self.decoder = Decoder(ch_in, bs_chanel, resolution, ch_muls, dropout)
-            
+        self.external = False
+    
+    def enable_external(self):
+        self.external = True
+
     def forward(self, x):
+        if self.external:
+            data_device = x.device
+            x = x.to(self.device)
+            z = self.encoder(x)
+            x_rec = self.decoder(z)
+            x = x.to(data_device)
+            x_rec = x_rec.to(data_device)
+            return x_rec
         z = self.encoder(x)
         x_rec = self.decoder(z)
         return x_rec
