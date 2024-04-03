@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 15:37:34
-LastEditTime: 2024-04-02 15:52:35
+LastEditTime: 2024-04-03 10:34:10
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/train.py
 '''
@@ -36,6 +36,10 @@ from models.frae import FRAE
 #  accelerate launch --multi_gpu --num_processes=2 scripts/train.py  #
 ######################################################################
 
+
+###############################################################################
+#  rsync -av --progress ../FreqDefense/ ./defense/FreqDefense/ --exclude data #
+###############################################################################
 
 # image log method
 @torch.no_grad()

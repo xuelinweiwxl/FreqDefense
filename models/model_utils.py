@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-28 22:34:31
-LastEditTime: 2024-03-28 23:49:00
+LastEditTime: 2024-04-03 10:44:51
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/model_utils.py
 '''
@@ -15,6 +15,7 @@ sys.path.append("..")
 
 from datasets.datautils import getImageSize
 from models.frae import FRAE
+from utils.utils import Low_freq_substitution, addRayleigh_noise
 
 
 # note that the result path should be the absolute path
@@ -41,6 +42,7 @@ def load_model(result_path, device, best=True):
     
     # load the model
     checkpoint = torch.load(result_path, map_location=device)
+    train_config = checkpoint['train_config']
     data_config = checkpoint['data_config']
     model_config = checkpoint['model_config']
     model_state = checkpoint['model']
@@ -62,27 +64,47 @@ def load_model(result_path, device, best=True):
     model = model.to(device)
     model.eval()
     print("Load the model successfully.")
-    return model
+    if train_config.f_distortion:
+        print('This model is trained with frequency distortion.')
+        print('Loading the frequency distortion module ...')
+        low_freq_image = torch.zeros(3, resolution, resolution)
+        print(f'f_distortion is True, f_alpha: {train_config.f_alpha}, f_beta: {train_config.f_beta}')
+        low_freq_substitution = Low_freq_substitution(
+            resolution, resolution, ch_in, low_freq_image, data_config.batch_size, train_config.f_alpha, train_config.f_beta)
+        high_noise = addRayleigh_noise(resolution, resolution, ch_in, data_config.batch_size, train_config.f_alpha, train_config.f_scale)
+        print('Frequency distortion module loaded.')
+        return [model, low_freq_substitution, high_noise]
+    return [model]
 
 def test():
-    result_path = "/data/wxl/code/FreqDefense/results/2024_03_26_19_49_40"
+    result_path = "/data/wxl/code/FreqDefense/results/2024_04_02_23_42"
     device = torch.device("cpu")
-    model = load_model(result_path, device, best=True)
+    model_list = load_model(result_path, device, best=True)
+    if len(model_list) >1:
+        model, low_freq_sub, high_noise = model_list[0], model_list[1], model_list[2]
     from torchvision import transforms as tf
     from PIL import Image
     from matplotlib import pyplot as plt
-    mean = [0.485, 0.456, 0.406]
-    std = [0.229, 0.224, 0.225]
+    mean = [0.5, 0.5, 0.5]
+    std = [0.5, 0.5, 0.5]
     to_tensor = tf.Compose([
-        tf.Resize((256, 256)),
-        tf.CenterCrop(256),
+        tf.Resize((32, 32)),
+        tf.CenterCrop(32),
         tf.ToTensor(),
         tf.Normalize(mean, std)
     ])
-    path = '/data/wxl/code/FreqDefense/data/20-imagenet/train/n01630670/n01630670_10341.JPEG'
+    path = '/data/wxl/code/FreqDefense/test.png'
     image = Image.open(path)
+    plt.imshow(image)
+    plt.show()
     test_data = to_tensor(image).unsqueeze(0)
     test_data = test_data.to(device)
+    if low_freq_sub is not None:
+        lw = Image.open('/data/wxl/code/FreqDefense/test2.png')
+        low_freq_sub.update(to_tensor(lw))
+        test_data = low_freq_sub(test_data)
+    if high_noise is not None:
+        test_data = high_noise(test_data)
     outputs = model(test_data)
     std = torch.tensor(std).view( 3, 1, 1)
     mean = torch.tensor(mean).view( 3, 1, 1)
