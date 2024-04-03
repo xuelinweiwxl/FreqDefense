@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-28 22:34:31
-LastEditTime: 2024-04-03 16:03:57
+LastEditTime: 2024-04-03 16:29:26
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/models/model_utils.py
 '''
@@ -62,6 +62,7 @@ def load_model(result_path, device, best=False):
     # load the model state and send to the device
     model.load_state_dict(model_state)
     model = model.to(device)
+    model.enable_external()
     model.eval()
     print("Load the model successfully.")
     if train_config.f_distortion:

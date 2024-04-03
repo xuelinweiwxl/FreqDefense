@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-25 10:36:30
-LastEditTime: 2024-04-03 15:57:48
+LastEditTime: 2024-04-03 16:53:53
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/utils/utils.py
 '''
@@ -80,12 +80,13 @@ class Low_freq_substitution(nn.Module):
 
         mask = self.mask.clone()
         low_freq_image_fft_amplitude = self.low_freq_image_fft_amplitude.clone()
-        mask = mask.unsqueeze(0).repeat_interleave(tensor.shape[0], dim=0)
-        low_freq_image_fft_amplitude = low_freq_image_fft_amplitude.unsqueeze(0).repeat_interleave(tensor.shape[0], dim=0)
+        if len(tensor.shape) > 3:
+            mask = mask.unsqueeze(0).repeat_interleave(tensor.shape[0], dim=0)
+            low_freq_image_fft_amplitude = low_freq_image_fft_amplitude.unsqueeze(0).repeat_interleave(tensor.shape[0], dim=0)
 
         tensor_amplitude = self.beta * mask * low_freq_image_fft_amplitude + \
             (torch.ones_like(mask)-mask) * tensor_amplitude
-
+        
         # get the new image tensor
         tensor_fft = torch.polar(tensor_amplitude, tensor_phase)
         tensor_fft = ifftshift(tensor_fft, dim=(-2, -1))
@@ -137,8 +138,9 @@ class addRayleigh_noise(nn.Module):
         noise = torch.tensor(noise, dtype=torch.float32)
         noise = noise.to(tensor.device)
 
-        mask = self.mask.clone()
-        mask = mask.unsqueeze(0).repeat_interleave(tensor.shape[0], dim=0)
+        if len(tensor.shape) > 3:
+            mask = self.mask.clone()
+            mask = mask.unsqueeze(0).repeat_interleave(tensor.shape[0], dim=0)
         
         tensor_amplitude = self.mask * noise + tensor_amplitude
 
@@ -183,7 +185,7 @@ def test():
     alpha = 0.1
     # lows = Low_freq_substitution(size, size, 3, lw, 1, alpha, 1)
     for i in range(1,20):
-        scale = i*10
+        scale = i*1
         high = addRayleigh_noise(size, size, 3, 1, alpha, scale)
         # lows.update(lw)
         # o = lows(img)
