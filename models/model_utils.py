@@ -2,24 +2,24 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-28 22:34:31
-LastEditTime: 2024-04-03 10:44:51
+LastEditTime: 2024-04-03 16:03:57
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
-FilePath: /FreqDefense/scripts/model_utils.py
+FilePath: /FreqDefense/models/model_utils.py
 '''
 
 import os
 import torch
 
 import sys
-sys.path.append("..")
+sys.path.append('/data/wxl/code')
 
-from datasets.datautils import getImageSize
-from models.frae import FRAE
-from utils.utils import Low_freq_substitution, addRayleigh_noise
+from FreqDefense.datasets.datautils import getImageSize
+from FreqDefense.models.frae import FRAE
+from FreqDefense.utils.utils import Low_freq_substitution, addRayleigh_noise, DictToObject
 
 
 # note that the result path should be the absolute path
-def load_model(result_path, device, best=True):
+def load_model(result_path, device, best=False):
     # check the result path
     if not os.path.exists(result_path):
         raise Exception("The result path does not exist.")
@@ -42,9 +42,9 @@ def load_model(result_path, device, best=True):
     
     # load the model
     checkpoint = torch.load(result_path, map_location=device)
-    train_config = checkpoint['train_config']
-    data_config = checkpoint['data_config']
-    model_config = checkpoint['model_config']
+    train_config = DictToObject(checkpoint['train_config'])
+    data_config = DictToObject(checkpoint['data_config'])
+    model_config = DictToObject(checkpoint['model_config'])
     model_state = checkpoint['model']
     print("Load the best model from %s" % result_path)
     ch_in, resolution = getImageSize(data_config.dataset_name)
@@ -75,6 +75,48 @@ def load_model(result_path, device, best=True):
         print('Frequency distortion module loaded.')
         return [model, low_freq_substitution, high_noise]
     return [model]
+
+# note that the result path should be the absolute path
+def recover(result_path, best=False):
+    # check the result path
+    if not os.path.exists(result_path):
+        raise Exception("The result path does not exist.")
+    
+    # check the config file
+    config_path = os.path.join(result_path, "config.yaml")
+    if not os.path.exists(config_path):
+        raise Exception("The config file does not exist.")
+    
+    if best:
+        # check the best model
+        if not os.path.exists(os.path.join(result_path, "best_model.pt")):
+            raise Exception("The best model does not exist.")
+        result_path = os.path.join(result_path, "best_model.pt")
+    else:
+        # check the last model
+        if not os.path.exists(os.path.join(result_path, "last_model.pt")):
+            raise Exception("The last model does not exist.")
+        result_path = os.path.join(result_path, "last_model.pt")
+    
+    # load the model
+    checkpoint = torch.load(result_path)
+    train_config = checkpoint['train_config']
+    data_config = checkpoint['data_config']
+    model_config = checkpoint['model_config']
+    model_state = checkpoint['model']
+    epoch = checkpoint['epoch']
+    loss = checkpoint['loss']
+    print("Load the best model from %s" % result_path)
+    state = {
+                'model': model_state,
+                'epoch': epoch,
+                'loss': loss,
+                'data_config': data_config.to_dict(),
+                'model_config': model_config.to_dict(),
+                'train_config': train_config.to_dict()
+            }
+    torch.save(state, result_path)
+    print("The model is recovered successfully.")
 
 def test():
     result_path = "/data/wxl/code/FreqDefense/results/2024_04_02_23_42"
@@ -123,3 +165,4 @@ def test():
 
 if __name__ == "__main__":
     test()
+    # recover("/data/wxl/code/FreqDefense/results/2024_04_02_23_42", best=False)

@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 15:37:34
-LastEditTime: 2024-04-03 10:34:10
+LastEditTime: 2024-04-03 16:02:22
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/train.py
 '''
@@ -23,14 +23,12 @@ from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import save_image, make_grid
 from focal_frequency_loss import FocalFrequencyLoss
 
-
 import sys
-sys.path.append(".")
-sys.path.append("..")
+sys.path.append('/data/wxl/code')
 
-from utils.utils import DictToObject, Low_freq_substitution, addRayleigh_noise
-from datasets.datautils import getDataloader, getImageSize, getNormalizeParameter
-from models.frae import FRAE
+from FreqDefense.utils.utils import DictToObject, Low_freq_substitution, addRayleigh_noise
+from FreqDefense.datasets.datautils import getDataloader, getImageSize, getNormalizeParameter
+from FreqDefense.models.frae import FRAE
 
 ######################################################################
 #  accelerate launch --multi_gpu --num_processes=2 scripts/train.py  #
@@ -384,9 +382,9 @@ def main(args):
                 'model': accelerator.unwrap_model(model).state_dict(),
                 'epoch': epoch,
                 'loss': loss,
-                'data_config': data_config,
-                'model_config': model_config,
-                'train_config': train_config
+                'data_config': data_config.to_dict(),
+                'model_config': model_config.to_dict(),
+                'train_config': train_config.to_dict()
             }
             if loss < best_loss:
                 best_loss = loss

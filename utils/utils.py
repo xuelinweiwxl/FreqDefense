@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-25 10:36:30
-LastEditTime: 2024-04-02 10:32:43
+LastEditTime: 2024-04-03 15:57:48
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/utils/utils.py
 '''
@@ -20,6 +20,9 @@ class DictToObject:
     def __init__(self, dictionary):
         for key, value in dictionary.items():
             setattr(self, key, value)
+    def to_dict(self):
+        return {key: getattr(self, key) for key in vars(self)}
+
 
 # visual module
 class Low_freq_substitution(nn.Module):
