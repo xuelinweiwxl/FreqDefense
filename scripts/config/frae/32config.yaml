@@ -1,0 +1,35 @@
+# Author: Xuelin Wei
+# Email: xuelinwei@seu.edu.cn
+# Date: 2024-03-21 15:37:34
+# LastEditTime: 2024-03-21 15:53:33
+# LastEditors: xuelinwei xuelinwei@seu.edu.cn
+# FilePath: /FreqDefense/scripts/train.py
+
+resume: False
+random_seed: 981217
+# result_name: 'cifar10_wo_lpips'
+data_config:
+  dataset_name: 'cifar10'
+  data_root: './data/'
+  batch_size: 128
+  num_workers: 8
+model_config:
+  bs_chanel: 64
+  dropout: 0.2
+  # d_factor can not greater than log2(resolution)
+  d_factor: 4
+train_config:
+  distributed: False
+  lr: 2.0e-5
+  lr_decay_step: 1000
+  lr_decay_rate: 5.0e-1
+  epochs: 1000
+  print_freq: 4
+  f_distortion: True
+  f_alpha: 0.1
+  f_beta: 1
+  f_scale: 5
+  ffl_loss: True
+  ffl_weight: 5.0
+  lpips_loss: True
+  augment: False

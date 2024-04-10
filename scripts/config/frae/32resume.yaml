@@ -1,0 +1,25 @@
+# Author: Xuelin Wei
+# Email: xuelinwei@seu.edu.cn
+# Date: 2024-03-21 15:37:34
+# LastEditTime: 2024-03-21 15:53:33
+# LastEditors: xuelinwei xuelinwei@seu.edu.cn
+# FilePath: /FreqDefense/scripts/train.py
+
+resume: True
+resume_result: '2024_03_26_10_56_04'
+random_seed: 981217
+train_config:
+  distributed: False
+  lr: 2.0e-6
+  lr_decay_step: 800
+  lr_decay_rate: 5.0e-1
+  epochs: 1000
+  print_freq: 4
+  f_distortion: True
+  f_alpha: 0.15
+  f_beta: 1
+  f_scale: 10
+  ffl_loss: True
+  ffl_weight: 1.0
+  lpips_loss: True
+  augment: False

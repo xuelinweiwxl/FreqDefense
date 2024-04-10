@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-28 22:34:31
-LastEditTime: 2024-04-03 18:03:15
+LastEditTime: 2024-04-10 19:05:55
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/models/model_utils.py
 '''
@@ -19,7 +19,7 @@ from FreqDefense.utils.utils import Low_freq_substitution, addRayleigh_noise, Di
 
 
 # note that the result path should be the absolute path
-def load_model(result_path, device, best=False):
+def load_model_frae(result_path, device, best=False):
     # check the result path
     if not os.path.exists(result_path):
         raise Exception("The result path does not exist.")

@@ -2,9 +2,9 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 15:37:34
-LastEditTime: 2024-04-10 11:07:15
+LastEditTime: 2024-04-10 18:59:40
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
-FilePath: /FreqDefense/scripts/train.py
+FilePath: /FreqDefense/scripts/train_frae.py
 '''
 
 import os
@@ -30,9 +30,9 @@ from FreqDefense.utils.utils import DictToObject, Low_freq_substitution, addRayl
 from FreqDefense.datasets.datautils import getDataloader, getImageSize, getNormalizeParameter
 from FreqDefense.models.frae import FRAE
 
-######################################################################
-#  accelerate launch --multi_gpu --num_processes=2 scripts/train.py  #
-######################################################################
+###########################################################################
+#  accelerate launch --multi_gpu --num_processes=2 scripts/train_frae.py  #
+###########################################################################
 
 # image log method
 @torch.no_grad()
@@ -422,6 +422,6 @@ if __name__ == "__main__":
     parser.add_argument("--result_dir", type=str, default='./results',
                         help="path to save outputs (ckpt, tensorboard runs)")
     parser.add_argument("--config_path", type=str,
-                        default='./scripts/32config.yaml', help="path to config file")
+                        default='./scripts/config/frae/32config.yaml', help="path to config file")
     args = parser.parse_args()
     main(args)
