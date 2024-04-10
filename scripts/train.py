@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 15:37:34
-LastEditTime: 2024-04-03 16:02:22
+LastEditTime: 2024-04-10 11:07:15
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/train.py
 '''
@@ -33,11 +33,6 @@ from FreqDefense.models.frae import FRAE
 ######################################################################
 #  accelerate launch --multi_gpu --num_processes=2 scripts/train.py  #
 ######################################################################
-
-
-###############################################################################
-#  rsync -av --progress ../FreqDefense/ ./defense/FreqDefense/ --exclude data #
-###############################################################################
 
 # image log method
 @torch.no_grad()
@@ -73,29 +68,38 @@ def train_one_epoch(model, optimizer, lpips, FFL, train_dataloader, data_config,
                 raise Exception("high_noise is None")
             img_f = low_freq_substitution(img)
             img_f = high_noise(img_f)
-            # augment the image
-            all_img = torch.cat([img_f, img], dim=0)
-            output = model(all_img)
-            correct_img = torch.cat([img, img], dim=0)
+            if train_config.augment:
+                # augment the image
+                all_img = torch.cat([img_f, img], dim=0)
+                output = model(all_img)
+                correct_img = torch.cat([img, img], dim=0)
+            else:
+                all_img = img_f
+                correct_img = img
+                output = model(img_f)
         else:
             all_img = img
             correct_img = img
             output = model(img)
         
-        loss_lpips = lpips(output, correct_img).mean()
-        # check if the loss is nan
-        if torch.isnan(loss_lpips).any():
-            logger.error(f"Loss is nan at epoch {cur_epoch}, iteration {i}")
-            raise Exception("Loss is nan")
+        loss = torch.zeros(1).to(all_img.device)
+        
+        if train_config.lpips_loss:
+            loss_lpips = lpips(output, correct_img).mean()
+            # check if the loss is nan
+            if torch.isnan(loss_lpips).any():
+                logger.error(f"Loss is nan at epoch {cur_epoch}, iteration {i}")
+                raise Exception("Loss is nan")
+            loss += loss_lpips
         
         # check the shape of the loss
         loss_l1 = (correct_img - output).abs().mean()
+        loss += loss_l1
 
         if train_config.ffl_loss:
             loss_ffl = FFL(output, correct_img, dim=0)
-            loss = loss_lpips + loss_l1 + loss_ffl
-        else:
-            loss = loss_lpips + loss_l1
+            loss += loss_ffl
+
         
         accelerator.backward(loss)
         optimizer.step()
@@ -103,17 +107,21 @@ def train_one_epoch(model, optimizer, lpips, FFL, train_dataloader, data_config,
         if accelerator.is_main_process:
             if i % print_steps == 0:
                 logger.info(
-                    f'Epoch {cur_epoch}/{train_config.epochs}, iteration {i}/{len(train_dataloader)}, loss: {loss.item()}, l1 loss: {loss_l1.item()}, lpips loss: {loss_lpips.mean().item()}, ffl loss: {loss_ffl.mean().item() if train_config.ffl_loss else 0.0}')
+                    f'Epoch {cur_epoch}/{train_config.epochs}, iteration {i}/{len(train_dataloader)}, loss: {loss.item()}, l1 loss: {loss_l1.item()}, lpips loss: {loss_lpips.mean().item() if train_config.lpips_loss else 0.0}, ffl loss: {loss_ffl.mean().item() if train_config.ffl_loss else 0.0}')
                 writer.add_scalar(
                     'train/l1_loss', loss_l1.item(), global_steps)
                 writer.add_scalar('train/loss', loss.item(), global_steps)
-                writer.add_scalar('train/loss_lpips',
-                                  loss_lpips.mean().item(), global_steps)
+                if train_config.lpips_loss:
+                    writer.add_scalar('train/loss_lpips',
+                                    loss_lpips.mean().item(), global_steps)
                 if train_config.ffl_loss:
                     writer.add_scalar('train/loss_ffl',
                                       loss_ffl.item(), global_steps)
                 if train_config.f_distortion:
-                    log_recons_image(data_config.dataset_name, 'train/recons', [img[0:2,:,:,:], img_f[0:2,:,:,:], output[0:2,:,:,:],output[img.shape[0]:img.shape[0]+2,:,:,:]], global_steps, writer)
+                    if train_config.augment:
+                        log_recons_image(data_config.dataset_name, 'train/recons', [img[0:2,:,:,:], img_f[0:2,:,:,:], output[0:2,:,:,:],output[img.shape[0]:img.shape[0]+2,:,:,:]], global_steps, writer)
+                    else:
+                        log_recons_image(data_config.dataset_name, 'train/recons', [img, img_f, output], global_steps, writer)
                 else:
                     log_recons_image(data_config.dataset_name,
                                  'train/recons', [img, output], global_steps, writer)
@@ -137,51 +145,60 @@ def validation_one_epoch(model, lpips, FFL, val_dataloader, data_config, train_c
                 output = model(img_f)
             else:
                 output = model(img)
-            lpips_loss = lpips(output, img).mean()
+
+            loss = torch.zeros(1).to(img.device)
+
             loss_l1 = (img - output).abs().mean()
-            if train_config.ffl_loss:
-                loss_ffl = FFL(output, img, dim=0)
-                loss_ffl.mean()
-                loss = lpips_loss + loss_l1 + loss_ffl
-                total_ffl_loss += loss_ffl.item() * img.shape[0]
-            else:
-                loss = lpips_loss + loss_l1
-            total_loss += loss.item() * img.shape[0]
+            loss += loss_l1
             total_l1_loss += loss_l1.item() * img.shape[0]
-            total_lpips_loss += lpips_loss.item() * img.shape[0]
+            
+
+            if train_config.lpips_loss:
+                lpips_loss = lpips(output, img).mean()
+                loss += lpips_loss
+                total_lpips_loss += lpips_loss.item() * img.shape[0]
+                
+            if train_config.ffl_loss:
+                loss_ffl = FFL(output, img, dim=0).mean()
+                loss += loss_ffl
+                total_ffl_loss += loss_ffl.item() * img.shape[0]
+                
+            total_loss += loss.item() * img.shape[0]
             item += img.shape[0]
 
         # gather all the loss
-        total_loss = accelerator.gather(total_loss)
         total_l1_loss = accelerator.gather(total_l1_loss)
-        total_lpips_loss = accelerator.gather(total_lpips_loss)
+        total_loss = accelerator.gather(total_loss)
         item = accelerator.gather(item)
 
         # calculate the mean loss
         total_loss = total_loss.sum().item()
         total_l1_loss = total_l1_loss.sum().item()
-        total_lpips_loss = total_lpips_loss.sum().item()
         item = item.sum().item()
 
         total_loss /= item
         total_l1_loss /= item
-        total_lpips_loss /= item
 
         if train_config.ffl_loss:
             total_ffl_loss = accelerator.gather(total_ffl_loss)
             total_ffl_loss = total_ffl_loss.sum().item()
             total_ffl_loss /= item
+        if train_config.lpips_loss:
+            total_lpips_loss = accelerator.gather(total_lpips_loss)
+            total_lpips_loss = total_lpips_loss.sum().item()
+            total_lpips_loss /= item
 
         if accelerator.is_main_process:
             logger.info(
-                f'Epoch {cur_epoch}/{train_config.epochs}, validation loss: {total_loss}, l1 loss: {total_l1_loss}, lpips loss: {total_lpips_loss}, ffl loss: {total_ffl_loss if train_config.ffl_loss else 0.0}')
+                f'Epoch {cur_epoch}/{train_config.epochs}, validation loss: {total_loss}, l1 loss: {total_l1_loss}, lpips loss: {total_lpips_loss if train_config.lpips_loss else 0.0 }, ffl loss: {total_ffl_loss if train_config.ffl_loss else 0.0}')
             writer.add_scalar('val/total_loss', total_loss, cur_epoch)
             writer.add_scalar('val/total_l1_loss', total_l1_loss, cur_epoch)
-            writer.add_scalar('val/total_lpips_loss',
-                              total_lpips_loss, cur_epoch)
             if train_config.ffl_loss:
                 writer.add_scalar('val/total_ffl_loss',
                                   total_ffl_loss, cur_epoch)
+            if train_config.lpips_loss:
+                writer.add_scalar('val/total_lpips_loss',
+                              total_lpips_loss, cur_epoch)
             log_recons_image(data_config.dataset_name,
                              'val/recons', [img, img_f, output], cur_epoch, writer)
     return total_loss
@@ -338,7 +355,7 @@ def main(args):
         # choose a random image from this batch
         idx = random.randint(0, len(train_dataloader.dataset)-1)
         low_freq_image = train_dataloader.dataset[idx][0].to(accelerator.device)
-        logger.info(f'f_distortion is True, f_alpha: {train_config.f_alpha}, f_beta: {train_config.f_beta}')
+        logger.info(f'f_distortion is True, f_alpha: {train_config.f_alpha}, f_beta: {train_config.f_beta}, f_scale: {train_config.f_scale}')
         low_freq_substitution = Low_freq_substitution(
             resolution, resolution, ch_in, low_freq_image, data_config.batch_size, train_config.f_alpha, train_config.f_beta)
         high_noise = addRayleigh_noise(resolution, resolution, ch_in, data_config.batch_size, train_config.f_alpha, train_config.f_scale)

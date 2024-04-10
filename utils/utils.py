@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-25 10:36:30
-LastEditTime: 2024-04-03 16:53:53
+LastEditTime: 2024-04-10 10:15:18
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/utils/utils.py
 '''
@@ -61,6 +61,18 @@ class Low_freq_substitution(nn.Module):
         self.register_buffer('mask', mask)
         self.register_buffer('low_freq_image_fft_amplitude', low_freq_image_fft_amplitude)
         
+    def update_alpha(self, alpha: float) -> None:
+        self.alpha = alpha
+        center = ((self.input_height-1)/2, (self.input_width-1)/2)
+        max_radius = min(
+            center[0], center[1], self.input_height-center[0], self.input_width-center[1])
+        radius = max_radius*self.alpha
+        mask = torch.zeros(self.channel, self.input_height, self.input_width)
+        for i in range(self.input_height):
+            for j in range(self.input_width):
+                if (i-center[0])**2 + (j-center[1])**2 <= radius**2:
+                    mask[:,i,j] = 1
+        self.mask = mask
     
     def update(self, low_freq_image: Tensor) -> None:
         assert low_freq_image.shape[0] == self.channel and low_freq_image.shape[
@@ -79,6 +91,12 @@ class Low_freq_substitution(nn.Module):
         tensor_phase = torch.angle(tensor_fft)
 
         mask = self.mask.clone()
+        
+        # from matplotlib import pyplot as plt
+        # # imshow mask
+        # plt.imshow(mask[0,:,:])
+        # plt.show()
+
         low_freq_image_fft_amplitude = self.low_freq_image_fft_amplitude.clone()
         if len(tensor.shape) > 3:
             mask = mask.unsqueeze(0).repeat_interleave(tensor.shape[0], dim=0)
@@ -126,6 +144,21 @@ class addRayleigh_noise(nn.Module):
                     mask[:,i,j] = 1
         self.register_buffer('mask', mask)
 
+    def update_alpha(self, alpha: float) :
+        self.alpha = alpha
+        center = ((self.input_height-1)/2, (self.input_width-1)/2)
+        max_radius = min(
+            center[0], center[1], self.input_height-center[0], self.input_width-center[1])
+        radius = max_radius*self.alpha
+        mask = torch.zeros(self.channel, self.input_height, self.input_width)
+        for i in range(self.input_height):
+            for j in range(self.input_width):
+                if (i-center[0])**2 + (j-center[1])**2 >= radius**2:
+                    mask[:,i,j] = 1
+    def update_scale(self, scale: float) :
+        self.scale = scale
+
+
     def forward(self, tensor: Tensor) -> Tensor:
         # get the amplitude and phase of the input image
         tensor_fft = fft2(tensor, dim=(-2, -1))
@@ -168,7 +201,7 @@ def test():
     size = 256
     # load the image
     img = Image.open('/data/wxl/code/FreqDefense/test.png')
-    img = Image.open('/data/wxl/code/FreqDefense/data/20-imagenet/train/n03404251/n03404251_530.JPEG')
+    # img = Image.open('/data/wxl/code/FreqDefense/data/20-imagenet/train/n03404251/n03404251_530.JPEG')
     # transform the image
     transform = T.Compose([
         T.Resize((size, size)),
@@ -180,16 +213,16 @@ def test():
         T.Normalize(mean=[-0.485, -0.456, -0.406], std=[1., 1., 1.]),
     ])
     img = transform(img).unsqueeze(0)
-    lw = Image.open('../data/20-imagenet/train/n02860847/n02860847_8.JPEG')
-    lw = torch.zeros(3, size, size)
-    alpha = 0.1
-    # lows = Low_freq_substitution(size, size, 3, lw, 1, alpha, 1)
-    for i in range(1,20):
-        scale = i*1
+    # lw = Image.open('../data/20-imagenet/train/n02860847/n02860847_8.JPEG')
+    lw = Image.open('/data/wxl/code/FreqDefense/test3.png')
+    lw = transform(lw)
+    alpha = 0.2
+    lows = Low_freq_substitution(size, size, 3, lw, 1, alpha, 1)
+    for i in range(1,10):
+        scale = i*10
         high = addRayleigh_noise(size, size, 3, 1, alpha, scale)
-        # lows.update(lw)
-        # o = lows(img)
-        o = high(img)
+        o = lows(img)
+        o = high(o)
         # print(o.shape)
         # print(img[0,0,:,:])
         # print(o[0,0,:,:])

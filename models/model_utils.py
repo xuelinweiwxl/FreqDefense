@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-28 22:34:31
-LastEditTime: 2024-04-03 16:29:26
+LastEditTime: 2024-04-03 18:03:15
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/models/model_utils.py
 '''
@@ -75,7 +75,8 @@ def load_model(result_path, device, best=False):
         high_noise = addRayleigh_noise(resolution, resolution, ch_in, data_config.batch_size, train_config.f_alpha, train_config.f_scale)
         print('Frequency distortion module loaded.')
         return [model, low_freq_substitution, high_noise]
-    return [model]
+    else:
+        return [model]
 
 # note that the result path should be the absolute path
 def recover(result_path, best=False):
@@ -165,5 +166,5 @@ def test():
         plt.show()
 
 if __name__ == "__main__":
-    test()
-    # recover("/data/wxl/code/FreqDefense/results/2024_04_02_23_42", best=False)
+    # test()
+    recover("/data/wxl/code/FreqDefense/results/2024_03_26_19_49_40", best=False)

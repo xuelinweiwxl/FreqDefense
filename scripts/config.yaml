@@ -11,7 +11,7 @@ random_seed: 981217
 data_config:
   dataset_name: 'imagenet'
   data_root: './data/'
-  batch_size: 32
+  batch_size: 16
   num_workers: 4
 model_config:
   bs_chanel: 64
@@ -21,13 +21,15 @@ model_config:
 train_config:
   distributed: False
   lr: 2.0e-5
-  lr_decay_step: 200
-  lr_decay_rate: 4.0e-1
-  epochs: 800
+  lr_decay_step: 1000
+  lr_decay_rate: 1.0e-1
+  epochs: 2000
   print_freq: 4
   f_distortion: True
-  f_alpha: 0.1
+  f_alpha: 0.15
   f_beta: 1
   f_scale: 80
   ffl_loss: True
-  ffl_weight: 1.0
+  ffl_weight: 5.0
+  lpips_loss: False
+  augment: False

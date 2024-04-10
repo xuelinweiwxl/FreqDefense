@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 14:56:44
-LastEditTime: 2024-04-03 10:41:00
+LastEditTime: 2024-04-03 18:14:03
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/datasets/datautils.py
 '''
@@ -108,9 +108,9 @@ def test():
     ])
     dataloader.dataset.transform = trans
     for x, y in tqdm(dataloader):
-        x = x[110,:,:,:]
+        x = x[111,:,:,:]
         x = toPIL(x)
-        x.save('../test2.png')
+        x.save('../test3.png')
         break
 if __name__ == '__main__':
     test()

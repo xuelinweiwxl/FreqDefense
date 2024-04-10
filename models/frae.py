@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-20 10:39:52
-LastEditTime: 2024-04-03 16:33:06
+LastEditTime: 2024-04-03 17:02:24
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/models/frae.py
 '''
@@ -146,11 +146,17 @@ class FRAE(nn.Module):
     def forward(self, x):
         if self.external:
             data_device = x.device
+            squeeze = False
+            if len(x.shape) < 4:
+                x = x.unsqueeze(0)
+                squeeze = True
             x = x.to(next(self.parameters()).device)
             z = self.encoder(x)
             x_rec = self.decoder(z)
             x = x.to(data_device)
             x_rec = x_rec.to(data_device)
+            if squeeze:
+                x_rec = x_rec.squeeze(0)
             return x_rec
         z = self.encoder(x)
         x_rec = self.decoder(z)
