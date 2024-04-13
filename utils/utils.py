@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-25 10:36:30
-LastEditTime: 2024-04-10 10:15:18
+LastEditTime: 2024-04-12 14:44:19
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/utils/utils.py
 '''
@@ -193,7 +193,120 @@ class addRayleigh_noise(nn.Module):
     def __repr__(self) -> str:
         return f"low_freq_substitution(alpha={self.alpha}, beta={self.beta})"
 
-def test():
+# create a new class to mask the certain area of the image
+class MaskAdder(nn.Module):
+    def __init__(self):
+        super(MaskAdder, self).__init__()
+
+    def forward(self, x:Tensor, pos, size):
+        assert size < min(x.shape[2], x.shape[3]), 'the size of mask should be smaller than the image'
+        
+        # create mask for different position
+        mask = torch.ones_like(x)
+        if pos == 'center':
+            left_top = (x.shape[2]//2-size//2, x.shape[3]//2-size//2)
+            mask[:, :, left_top[0]:left_top[0]+size, left_top[1]:left_top[1]+size] = 0
+        elif pos == 'lt':
+            mask[:, :, 0:size, 0:size] = 0
+        elif pos == 'rt':
+            mask[:, :, 0:size, x.shape[3]-size:] = 0
+        elif pos == 'lb':
+            mask[:, :, x.shape[2]-size:, 0:size] = 0
+        elif pos == 'rb':
+            mask[:, :, x.shape[2]-size:, x.shape[3]-size:] = 0
+        elif pos == 'all':
+            x = torch.cat([self.forward(x, 'lt', size), self.forward(x, 'rt', size), self.forward(x, 'lb', size), self.forward(x, 'rb', size), self.forward(x, 'center', size)], dim=0)
+            return x
+        else:
+            raise ValueError('the position is not supported')
+        return x * mask + torch.ones_like(x) * (1-mask)
+
+    def __call__(self, x:Tensor, pos, size):
+        return self.forward(x, pos, size)
+
+    def __repr__(self):
+        return f"maskadder(size={self.alpha})"
+    
+# blended other image to the image
+class BlendImage(nn.Module):
+    def __init__(self):
+        super(BlendImage, self).__init__()
+
+    def forward(self, x:Tensor, blend_image:Tensor, alpha=0.1):
+        return (1-alpha) * x + alpha * blend_image
+        
+
+    def __call__(self, x:Tensor, blend_image:Tensor, alpha=0.1):
+        return self.forward(x, blend_image, alpha)
+
+    def __repr__(self):
+        return f"blend_image(alpha={self.alpha})"
+    
+def test_blended():
+    import sys
+    sys.path.append('../')
+    from datasets.datautils import getDataloader
+    from torchvision.transforms import transforms as T
+    from torchvision.utils import make_grid
+    from matplotlib import pyplot as plt
+    from PIL import Image
+    datasetname = 'cifar10'
+    root = '../data'
+    dataloader = getDataloader(datasetname, root, 8, 4, True)
+    testdataloader = getDataloader(datasetname, root, 8, 4, False)
+    print(len(dataloader.dataset), len(testdataloader.dataset))
+    from tqdm import tqdm
+    toPIL = T.ToPILImage()
+    trans = T.Compose([
+        T.Resize(32),
+        T.CenterCrop(32),
+        T.ToTensor()
+    ])
+    blend_image = trans(Image.open('../test.png'))
+    dataloader.dataset.transform = trans
+    for x, y in tqdm(dataloader):
+        all_images = []
+        all_images.append(x)
+        blend = BlendImage()
+        for i in range(10):
+            x_blended = blend(x, blend_image, i*0.1)
+            all_images.append(x_blended)
+        x = make_grid(torch.cat(all_images), 8)
+        plt.axis('off')
+        plt.imshow(toPIL(x))
+        break
+
+
+def test_mask():
+    import sys
+    sys.path.append('../')
+    from datasets.datautils import getDataloader
+    from torchvision.transforms import transforms as T
+    from torchvision.utils import make_grid
+    from matplotlib import pyplot as plt
+    datasetname = 'cifar10'
+    root = '../data'
+    dataloader = getDataloader(datasetname, root, 8, 4, True)
+    testdataloader = getDataloader(datasetname, root, 8, 4, False)
+    print(len(dataloader.dataset), len(testdataloader.dataset))
+    from tqdm import tqdm
+    toPIL = T.ToPILImage()
+    trans = T.Compose([
+        T.Resize(32),
+        T.CenterCrop(32),
+        T.ToTensor()
+    ])
+    dataloader.dataset.transform = trans
+    for x, y in tqdm(dataloader):
+        maskadder = MaskAdder()
+        x_masked = maskadder(x, 'all', 4)
+        x = make_grid(torch.cat([x,x_masked]), 8)
+        plt.imshow(toPIL(x))
+        break
+        
+
+
+def test_lh():
     from PIL import Image
     import torchvision.transforms as T
     import numpy as np
@@ -237,4 +350,5 @@ def test():
         plt.show()
 
 if __name__ == '__main__':
-    test()
+    # test_mask()
+    test_blended()

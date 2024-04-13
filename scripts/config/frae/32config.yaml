@@ -30,6 +30,6 @@ train_config:
   f_beta: 1
   f_scale: 5
   ffl_loss: True
-  ffl_weight: 5.0
-  lpips_loss: True
+  ffl_weight: 1.0
+  lpips_loss: False
   augment: False

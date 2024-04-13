@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-04-10 15:41:14
-LastEditTime: 2024-04-10 16:45:32
+LastEditTime: 2024-04-11 18:48:36
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/models/trn.py
 '''
@@ -10,7 +10,11 @@ FilePath: /FreqDefense/models/trn.py
 import torch
 from torch import nn
 from torch.fft import fft2, fftshift, ifft2, ifftshift
-from frae import FRAE
+
+import sys
+sys.path.append('/data/wxl/code')
+
+from FreqDefense.models.frae import FRAE
 
 
 class TRN(nn.Module):
@@ -28,7 +32,7 @@ class TRN(nn.Module):
     def enable_external(self):
         self.external = True
 
-    def forward(self, x, external):
+    def forward(self, x):
         if self.external:
             data_device = x.device
             squeeze = False
@@ -47,18 +51,19 @@ class TRN(nn.Module):
         mask = self.mask_gen(x_amplitude)
 
         # make mask binary
-        mask = (mask > 0.5).float()
+        mask_binary = torch.sign(mask - 0.5).clamp(min=0)
 
         # apply mask to the amplitude
-        x_amplitude = x_amplitude * mask
+        x_amplitude_masked = x_amplitude * mask_binary
 
         # turn to spatial domain
-        x_fft = torch.polar(x_amplitude, x_phase).real()
-        x_fft = ifftshift(x_fft, dim=(-2, -1))
-        x = ifft2(x_fft, dim=(-2, -1))
+        x_fft_masked = torch.polar(x_amplitude_masked, x_phase)
+        x_fft_masked = ifftshift(x_fft_masked, dim=(-2, -1))
+        x_masked = ifft2(x_fft_masked, dim=(-2, -1))
+        x_masked = torch.real(x_masked)
 
         # recover the image
-        x_rec = self.recover(x)
+        x_rec = self.recover(x_masked)
 
         if self.external:
             x = x.to(data_device)
@@ -66,6 +71,6 @@ class TRN(nn.Module):
             mask = mask.to(data_device)
             if squeeze:
                 x_rec = x_rec.squeeze(0)
-            return x_rec, mask
+            return x_rec, mask_binary
         else:
-            return x_rec, mask
+            return x_rec, mask_binary
