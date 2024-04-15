@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-28 22:34:31
-LastEditTime: 2024-04-10 19:05:55
+LastEditTime: 2024-04-15 11:41:05
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/models/model_utils.py
 '''
@@ -19,7 +19,7 @@ from FreqDefense.utils.utils import Low_freq_substitution, addRayleigh_noise, Di
 
 
 # note that the result path should be the absolute path
-def load_model_frae(result_path, device, best=False):
+def load_model(result_path, device, best=False):
     # check the result path
     if not os.path.exists(result_path):
         raise Exception("The result path does not exist.")
@@ -121,7 +121,7 @@ def recover(result_path, best=False):
     print("The model is recovered successfully.")
 
 def test():
-    result_path = "/data/wxl/code/FreqDefense/results/2024_04_02_23_42"
+    result_path = "/data/wxl/code/FreqDefense/results/2024_04_12_10_04"
     device = torch.device("cpu")
     model_list = load_model(result_path, device, best=True)
     if len(model_list) >1:
@@ -166,5 +166,5 @@ def test():
         plt.show()
 
 if __name__ == "__main__":
-    # test()
-    recover("/data/wxl/code/FreqDefense/results/2024_03_26_19_49_40", best=False)
+    test()
+    # recover("/data/wxl/code/FreqDefense/results/2024_03_26_19_49_40", best=False)

@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-25 10:36:30
-LastEditTime: 2024-04-12 14:44:19
+LastEditTime: 2024-04-15 11:44:19
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/utils/utils.py
 '''
@@ -19,9 +19,19 @@ from copy import deepcopy
 class DictToObject:
     def __init__(self, dictionary):
         for key, value in dictionary.items():
-            setattr(self, key, value)
+            if isinstance(value, dict):
+                setattr(self, key, DictToObject(value))
+            else:
+                setattr(self, key, value)
     def to_dict(self):
-        return {key: getattr(self, key) for key in vars(self)}
+        dict = {}
+        for key in vars(self):
+            value = getattr(self, key)
+            if isinstance(value, DictToObject):
+                dict[key] = value.to_dict()
+            else:
+                dict[key] = value
+        return dict
 
 
 # visual module
