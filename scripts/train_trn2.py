@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-04-12 10:36:00
-LastEditTime: 2024-04-15 23:03:13
+LastEditTime: 2024-04-17 15:26:16
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/train_trn2.py
 '''
@@ -69,6 +69,85 @@ def log_recons_image(datasetname, name, imagelist, steps, writer, ncolumns=4, he
         writer.add_figure(name, figure, steps)
         writer.flush()
 
+# using one function instead
+def process(train_config, img, model, **kwargs):
+    augmented_imgs = [img]
+    correct_imgs = [img]
+    ncolumns = 1
+
+    # mask the image
+    if train_config.masked.enable:
+        assert 'mask_adder' in kwargs, 'mask_adder is None'
+        mask_adder = kwargs['mask_adder']
+        method = train_config.masked.method
+        masked_img = mask_adder(img, method, train_config.masked.size)
+        augmented_imgs.append(masked_img)
+        if method == 'all':
+            correct_imgs.append(img.repeat(5,1,1,1))
+            ncolumns += 5
+        else:
+            correct_imgs.append(img)
+            ncolumns += 1
+    
+    # blend the image
+    if train_config.blend:
+        assert 'blend_image' in kwargs, 'blend_image is None'
+        assert 'blend' in kwargs, 'blend is None'
+        blend_image = kwargs['blend_image']
+        blend = kwargs['blend']
+        for j in range(5):
+            blended_img = blend(img, blend_image, (j+1) * 0.1)
+            augmented_imgs.append(blended_img)
+            correct_imgs.append(img)
+            ncolumns += 1
+    
+    # maybe add more
+
+    # concatenate the images
+    augmented_imgs = torch.cat(augmented_imgs, dim=0)
+    correct_imgs = torch.cat(correct_imgs, dim=0)
+
+    # adding distortion
+    if train_config.f_distortion.enable:
+        # get frequency distortion function
+        assert 'low_freq_substitution' in kwargs, 'low_freq_substitution is None'
+        assert 'high_noise' in kwargs, 'high_noise is None'
+        low_freq_substitution = kwargs['low_freq_substitution']
+        high_noise = kwargs['high_noise']
+
+        # add distortion to the image
+        input_imgs_f = low_freq_substitution(augmented_imgs)
+        input_imgs_f = high_noise(input_imgs_f)
+        input_imgs = input_imgs_f
+    else:
+        input_imgs = augmented_imgs
+    
+    # get fft of the input images
+    input_imgs_fft = fft2(input_imgs, dim=(-2, -1))
+    input_imgs_fft = fftshift(input_imgs_fft, dim=(-2, -1))
+    input_imgs_amplitude = torch.abs(input_imgs_fft)
+    input_imgs_phase = torch.angle(input_imgs_fft)
+    # input_imgs_amplitude_log = torch.log10(input_imgs_amplitude + 1.0)
+
+    # get fft of the correct images
+    correct_imgs_fft = fft2(correct_imgs, dim=(-2, -1))
+    correct_imgs_fft = fftshift(correct_imgs_fft, dim=(-2, -1))
+    correct_imgs_amplitude = torch.abs(correct_imgs_fft)
+    correct_imgs_phase = torch.angle(correct_imgs_fft)
+    # correct_imgs_amplitude_log = torch.log10(correct_imgs_amplitude + 1.0)
+
+    # get the output of the model
+    output_phase = model(input_imgs_phase)
+    output_amplitude = input_imgs_amplitude
+
+    # reconstruct the output image
+    output_fft = torch.polar(output_amplitude, output_phase)
+    output_fft = ifftshift(output_fft, dim=(-2, -1))
+    output_imgs = ifft2(output_fft, dim=(-2, -1))
+    output_imgs = torch.real(output_imgs)
+
+    return ncolumns, input_imgs, input_imgs_amplitude, input_imgs_phase, correct_imgs, correct_imgs_amplitude, correct_imgs_phase, output_imgs, output_amplitude, output_phase
+
 
 def train_one_epoch(model, optimizer, train_dataloader, data_config, train_config, accelerator, writer, logger, cur_epoch, **kwargs):
     model.train()
@@ -79,97 +158,33 @@ def train_one_epoch(model, optimizer, train_dataloader, data_config, train_confi
     
         global_steps = cur_epoch * len(train_dataloader) + i
         batch_size = img.shape[0]
-        ncolumns = 1
 
-        augmented_imgs = [img]
-        correct_imgs = [img]
-
-        # mask the image
-        if train_config.masked.enable:
-            assert 'mask_adder' in kwargs, 'mask_adder is None'
-            mask_adder = kwargs['mask_adder']
-            method = train_config.masked.method
-            masked_img = mask_adder(img, method, train_config.masked.size)
-            augmented_imgs.append(masked_img)
-            if method == 'all':
-                correct_imgs.append(img.repeat(5,1,1,1))
-                ncolumns += 5
-            else:
-                correct_imgs.append(img)
-                ncolumns += 1
-        
-        # blend the image
-        if train_config.blend:
-            assert 'blend_image' in kwargs, 'blend_image is None'
-            assert 'blend' in kwargs, 'blend is None'
-            blend_image = kwargs['blend_image']
-            blend = kwargs['blend']
-            for j in range(5):
-                blended_img = blend(img, blend_image, (j+1) * 0.1)
-                augmented_imgs.append(blended_img)
-                correct_imgs.append(img)
-                ncolumns += 1
-        
-        # maybe add more
-
-        # concatenate the images
-        augmented_imgs = torch.cat(augmented_imgs, dim=0)
-        correct_imgs = torch.cat(correct_imgs, dim=0)
-
-        # adding distortion
-        if train_config.f_distortion.enable:
-            # get frequency distortion function
-            assert 'low_freq_substitution' in kwargs, 'low_freq_substitution is None'
-            assert 'high_noise' in kwargs, 'high_noise is None'
-            low_freq_substitution = kwargs['low_freq_substitution']
-            high_noise = kwargs['high_noise']
-
-            # add distortion to the image
-            input_imgs_f = low_freq_substitution(augmented_imgs)
-            input_imgs_f = high_noise(input_imgs_f)
-            input_imgs = input_imgs_f
-        else:
-            input_imgs = augmented_imgs
-        
-        # get fft of the input images
-        input_imgs_fft = fft2(input_imgs, dim=(-2, -1))
-        input_imgs_fft = fftshift(input_imgs_fft, dim=(-2, -1))
-        input_imgs_amplitude = torch.abs(input_imgs_fft)
-        input_imgs_phase = torch.angle(input_imgs_fft)
-        input_imgs_amplitude_log = torch.log10(input_imgs_amplitude + 1.0)
-
-        # get fft of the correct images
-        correct_imgs_fft = fft2(correct_imgs, dim=(-2, -1))
-        correct_imgs_fft = fftshift(correct_imgs_fft, dim=(-2, -1))
-        correct_imgs_amplitude = torch.abs(correct_imgs_fft)
-        correct_imgs_phase = torch.angle(correct_imgs_fft)
-        correct_imgs_amplitude_log = torch.log10(correct_imgs_amplitude + 1.0)
-
-        # get the output of the model
-        output_amplitude_log = model(input_imgs_amplitude_log)
+        ncolumns, input_imgs, input_imgs_amplitude, input_imgs_phase, correct_imgs, correct_imgs_amplitude, correct_imgs_phase, output_imgs, output_amplitude, output_phase = process(train_config, img, model, **kwargs)
 
         # calculate the amplitude loss
-        loss_amplitude = torch.tensor(0.0).to(input_imgs.device)
+        loss_amplitude = torch.tensor(0.0).to(img.device)
         loss_dict_amp = {}
         # TODO: maybe this can be changed, the loss are different between low and high frequency, and then add them together
+        # if 'l1' in train_config.amp_loss:
+        #     loss_freq_l1 = torch.nn.L1Loss()(output_amplitude, correct_imgs_amplitude)
+        #     loss_amplitude += loss_freq_l1
+        #     loss_dict_amp['loss_freq_l1'] = loss_freq_l1
+        # if 'mse' in train_config.amp_loss:
+        #     loss_freq_mse = torch.nn.MSELoss()(output_amplitude, correct_imgs_amplitude)
+        #     loss_amplitude += loss_freq_mse
+        #     loss_dict_amp['loss_freq_mse'] = loss_freq_mse
+        
         if 'l1' in train_config.amp_loss:
-            loss_freq_l1 = torch.nn.L1Loss()(output_amplitude_log, correct_imgs_amplitude_log)
+            loss_freq_l1 = torch.nn.L1Loss()(output_phase, correct_imgs_phase)
             loss_amplitude += loss_freq_l1
             loss_dict_amp['loss_freq_l1'] = loss_freq_l1
         if 'mse' in train_config.amp_loss:
-            loss_freq_mse = torch.nn.MSELoss()(output_amplitude_log, correct_imgs_amplitude_log)
+            loss_freq_mse = torch.nn.MSELoss()(output_phase, correct_imgs_phase)
             loss_amplitude += loss_freq_mse
             loss_dict_amp['loss_freq_mse'] = loss_freq_mse
         
-        # reconstruct the output image
-        output_amplitude = torch.exp(output_amplitude_log) - 1.0
-        output_fft = torch.polar(output_amplitude, input_imgs_phase)
-        output_fft = ifftshift(output_fft, dim=(-2, -1))
-        output_imgs = ifft2(output_fft, dim=(-2, -1))
-        output_imgs = torch.real(output_imgs)
-
         # calculate the image loss
-        loss_img = torch.tensor(0.0).to(input_imgs.device)
+        loss_img = torch.tensor(0.0).to(img.device)
         loss_dict_img = {}
         if 'l1' in train_config.img_loss:
             loss_img_l1 = torch.nn.L1Loss()(output_imgs, correct_imgs)
@@ -189,7 +204,9 @@ def train_one_epoch(model, optimizer, train_dataloader, data_config, train_confi
             loss_dict_img['loss_img_ffl'] = loss_img_ffl
         
         # calculate the total loss
-        loss = loss_amplitude + loss_img
+        # loss = loss_amplitude*train_config.amp_loss_weight + loss_img * train_config.img_loss_weight
+        loss = loss_amplitude 
+
 
         # backward and optimize
         accelerator.backward(loss)
@@ -218,11 +235,13 @@ def train_one_epoch(model, optimizer, train_dataloader, data_config, train_confi
 
                 # log the image
                 index = [ i * batch_size for i in range(ncolumns)]
-                log_recons_image(None, 'train/amp_rec', [input_imgs_amplitude_log[index], output_amplitude_log[index]], global_steps, writer, ncolumns)
-                log_recons_image(None, 'train/amp_heatmap', [input_imgs_amplitude_log[index], output_amplitude_log[index]], global_steps, writer, ncolumns, heatmap=True)
-                if train_config.f_distortion:
-                    log_recons_image(data_config.dataset_name, 'train/img', [correct_imgs[index], input_imgs_f[index], output_imgs[index]], global_steps, writer, ncolumns)
-                log_recons_image(data_config.dataset_name, 'train/img_rec', [correct_imgs[index], output_imgs[index]], global_steps, writer, ncolumns)
+                difference_input = input_imgs[index] - correct_imgs[index]
+                difference_output = output_imgs[index] - correct_imgs[index]
+                log_recons_image(None, 'train/phase_rec', [input_imgs_phase[index], input_imgs_phase[index]-correct_imgs_phase[index], output_phase[index], output_phase[index]-correct_imgs_phase[index], correct_imgs_phase[index]], global_steps, writer, ncolumns)
+                log_recons_image(None, 'train/phase_heatmap', [difference_input, difference_output], global_steps, writer, ncolumns, heatmap=True)
+                # log_recons_image(None, 'train/amp_rec', [input_imgs_amplitude[index], output_amplitude[index]], global_steps, writer, ncolumns)
+                # log_recons_image(None, 'train/amp_heatmap', [input_imgs_amplitude[index], output_amplitude[index]], global_steps, writer, ncolumns, heatmap=True)
+                log_recons_image(data_config.dataset_name, 'train/img_rec', [input_imgs[index], output_imgs[index], correct_imgs[index]], global_steps, writer, ncolumns)
         
                 
 
@@ -242,106 +261,49 @@ def validation_one_epoch(model, val_dataloader, data_config, train_config, accel
     with torch.no_grad():
         for _, (img, _) in tqdm(enumerate(val_dataloader)):
             batch_size = img.shape[0]
-            ncolumns = 1
+            ncolumns, input_imgs, input_imgs_amplitude, input_imgs_phase, correct_imgs, correct_imgs_amplitude, correct_imgs_phase, output_imgs, output_amplitude, output_phase = process(train_config, img, model, **kwargs)
 
-            augmented_imgs = [img]
-            correct_imgs = [img]
-
-            # mask the image
-            if train_config.masked.enable:
-                assert 'mask_adder' in kwargs, 'mask_adder is None'
-                mask_adder = kwargs['mask_adder']
-                method = 'all'
-                masked_img = mask_adder(img, method, train_config.masked.size)
-                augmented_imgs.append(masked_img)
-                if method == 'all':
-                    correct_imgs.append(img.repeat(5,1,1,1))
-                    ncolumns += 5
-                else:
-                    correct_imgs.append(img)
-                    ncolumns += 1
-            
-            # blend the image
-            if train_config.blend.enable:
-                assert 'blend_image' in kwargs, 'blend_image is None'
-                assert 'blend' in kwargs, 'blend is None'
-                blend_image = kwargs['blend_image']
-                blend = kwargs['blend']
-                for j in range(5):
-                    blended_img = blend(img, blend_image, (j+1) * 0.1)
-                    augmented_imgs.append(blended_img)
-                    correct_imgs.append(img)
-                    ncolumns += 1
-            
-            # TODO:maybe add more
-
-            # concatenate the images
-            augmented_imgs = torch.cat(augmented_imgs, dim=0)
-            correct_imgs = torch.cat(correct_imgs, dim=0)
-
-            # adding distortion
-            if train_config.f_distortion.enable:
-                # get frequency distortion function
-                assert 'low_freq_substitution' in kwargs, 'low_freq_substitution is None'
-                assert 'high_noise' in kwargs, 'high_noise is None'
-                low_freq_substitution = kwargs['low_freq_substitution']
-                high_noise = kwargs['high_noise']
-
-                # add distortion to the image
-                input_imgs_f = low_freq_substitution(augmented_imgs)
-                input_imgs_f = high_noise(input_imgs_f)
-                input_imgs = input_imgs_f
-            else:
-                input_imgs = augmented_imgs
-            
-            # get fft of the input images
-            input_imgs_fft = fft2(input_imgs, dim=(-2, -1))
-            input_imgs_fft = fftshift(input_imgs_fft, dim=(-2, -1))
-            input_imgs_amplitude = torch.abs(input_imgs_fft)
-            input_imgs_phase = torch.angle(input_imgs_fft)
-            input_imgs_amplitude_log = torch.log10(input_imgs_amplitude + 1.0)
-
-            # get fft of the correct images
-            correct_imgs_fft = fft2(correct_imgs, dim=(-2, -1))
-            correct_imgs_fft = fftshift(correct_imgs_fft, dim=(-2, -1))
-            correct_imgs_amplitude = torch.abs(correct_imgs_fft)
-            correct_imgs_phase = torch.angle(correct_imgs_fft)
-            correct_imgs_amplitude_log = torch.log10(correct_imgs_amplitude + 1.0)
-
-            # get the output of the model
-            output_amplitude_log = model(input_imgs_amplitude_log)
-
-            # reconstruct the output image
-            output_amplitude = torch.exp(output_amplitude_log) - 1.0
-            output_fft = torch.polar(output_amplitude, input_imgs_phase)
-            output_fft = ifftshift(output_fft, dim=(-2, -1))
-            output_imgs = ifft2(output_fft, dim=(-2, -1))
-            output_imgs = torch.real(output_imgs)
 
             # TODO: maybe this can be changed, the loss are different between low and high frequency, and then add them together
+            # if 'l1' in train_config.amp_loss:
+            #     if 'total_loss_freq_l1' not in total_loss_dict.keys():
+            #         total_loss_dict['total_loss_freq_l1'] = torch.tensor(0.0).to(device)
+            #     loss_freq_l1 = torch.nn.L1Loss()(output_amplitude, correct_imgs_amplitude)
+            #     total_loss_dict['total_loss_freq_l1'] += loss_freq_l1 * output_amplitude.shape[0]
+            #     total_loss_dict['total_loss_amplitude'] += loss_freq_l1 * output_amplitude.shape[0]
+            #     total_loss_dict['total_loss'] += loss_freq_l1 * output_amplitude.shape[0]
+
+            # if 'mse' in train_config.amp_loss:
+            #     if 'total_loss_freq_mse' not in total_loss_dict.keys():
+            #         total_loss_dict['total_loss_freq_mse'] = torch.tensor(0.0).to(device)
+            #     loss_freq_mse = torch.nn.MSELoss()(output_amplitude, correct_imgs_amplitude)
+            #     total_loss_dict['total_loss_freq_mse'] += loss_freq_mse * output_amplitude.shape[0]
+            #     total_loss_dict['total_loss_amplitude'] += loss_freq_mse * output_amplitude.shape[0]
+            #     total_loss_dict['total_loss'] += loss_freq_mse * output_amplitude.shape[0]
+
             if 'l1' in train_config.amp_loss:
                 if 'total_loss_freq_l1' not in total_loss_dict.keys():
                     total_loss_dict['total_loss_freq_l1'] = torch.tensor(0.0).to(device)
-                loss_freq_l1 = torch.nn.L1Loss()(output_amplitude_log, correct_imgs_amplitude_log)
-                total_loss_dict['total_loss_freq_l1'] += loss_freq_l1 * output_amplitude_log.shape[0]
-                total_loss_dict['total_loss_amplitude'] += loss_freq_l1 * output_amplitude_log.shape[0]
-                total_loss_dict['total_loss'] += loss_freq_l1 * output_amplitude_log.shape[0]
+                loss_freq_l1 = torch.nn.L1Loss()(output_phase, correct_imgs_phase)
+                total_loss_dict['total_loss_freq_l1'] += loss_freq_l1 * output_amplitude.shape[0]
+                total_loss_dict['total_loss_amplitude'] += loss_freq_l1 * output_amplitude.shape[0]
+                total_loss_dict['total_loss'] += loss_freq_l1 * output_amplitude.shape[0]
 
             if 'mse' in train_config.amp_loss:
                 if 'total_loss_freq_mse' not in total_loss_dict.keys():
                     total_loss_dict['total_loss_freq_mse'] = torch.tensor(0.0).to(device)
-                loss_freq_mse = torch.nn.MSELoss()(output_amplitude_log, correct_imgs_amplitude_log)
-                total_loss_dict['total_loss_freq_mse'] += loss_freq_mse * output_amplitude_log.shape[0]
-                total_loss_dict['total_loss_amplitude'] += loss_freq_mse * output_amplitude_log.shape[0]
-                total_loss_dict['total_loss'] += loss_freq_mse * output_amplitude_log.shape[0]
+                loss_freq_mse = torch.nn.MSELoss()(output_phase, correct_imgs_phase)
+                total_loss_dict['total_loss_freq_mse'] += loss_freq_mse * output_amplitude.shape[0]
+                total_loss_dict['total_loss_amplitude'] += loss_freq_mse * output_amplitude.shape[0]
+                total_loss_dict['total_loss'] += loss_freq_mse * output_amplitude.shape[0]
 
             if 'l1' in train_config.img_loss:
                 if 'total_loss_img_l1' not in total_loss_dict.keys():
                     total_loss_dict['total_loss_img_l1'] = torch.tensor(0.0).to(device)
                 loss_img_l1 = torch.nn.L1Loss()(output_imgs, correct_imgs)
-                total_loss_dict['total_loss_img_l1'] += loss_img_l1  * output_amplitude_log.shape[0]
-                total_loss_dict['total_loss_img'] += loss_img_l1  * output_amplitude_log.shape[0]
-                total_loss_dict['total_loss'] += loss_img_l1  * output_amplitude_log.shape[0]
+                total_loss_dict['total_loss_img_l1'] += loss_img_l1  * output_amplitude.shape[0]
+                total_loss_dict['total_loss_img'] += loss_img_l1  * output_amplitude.shape[0]
+                total_loss_dict['total_loss'] += loss_img_l1  * output_amplitude.shape[0]
 
             # The lpips function return N x 1 tensor, we need to sum them
             if 'lpips' in train_config.img_loss:
@@ -360,13 +322,13 @@ def validation_one_epoch(model, val_dataloader, data_config, train_config, accel
                     total_loss_dict['total_loss_img_ffl'] = torch.tensor(0.0).to(device)
                 FFL = kwargs['FFL']
                 loss_img_ffl = FFL(output_imgs, correct_imgs)
-                total_loss_dict['total_loss_img_ffl'] += loss_img_ffl * output_amplitude_log.shape[0]
-                total_loss_dict['total_loss_img'] += loss_img_ffl * output_amplitude_log.shape[0]
-                total_loss_dict['total_loss'] += loss_img_ffl * output_amplitude_log.shape[0]
+                total_loss_dict['total_loss_img_ffl'] += loss_img_ffl * output_amplitude.shape[0]
+                total_loss_dict['total_loss_img'] += loss_img_ffl * output_amplitude.shape[0]
+                total_loss_dict['total_loss'] += loss_img_ffl * output_amplitude.shape[0]
             
             
             # calculate the total loss
-            total_loss_dict['item'] += output_amplitude_log.shape[0]
+            total_loss_dict['item'] += output_amplitude.shape[0]
         
 
         # gather all loss and get the mean loss
@@ -385,12 +347,10 @@ def validation_one_epoch(model, val_dataloader, data_config, train_config, accel
                 writer.add_scalar(f'val/{key}', value, cur_epoch)
             # log the image
             index = [ i * batch_size for i in range(ncolumns)]
-            log_recons_image(None, 'val/amp_rec', [input_imgs_amplitude_log[index], output_amplitude_log[index]], cur_epoch, writer, ncolumns)
-            log_recons_image(None, 'val/amp_heatmap', [input_imgs_amplitude_log[index], output_amplitude_log[index]], cur_epoch, writer, ncolumns, heatmap=True)
-            if train_config.f_distortion:
-                log_recons_image(data_config.dataset_name, 'val/img_rec', [correct_imgs[index], input_imgs_f[index], output_imgs[index]], cur_epoch, writer, ncolumns)
-            else:
-                log_recons_image(data_config.dataset_name, 'val/img_rec', [correct_imgs[index], output_imgs[index]], cur_epoch, writer, ncolumns)
+            log_recons_image(None, 'val/phase_rec', [input_imgs_phase[index], output_phase[index], correct_imgs_phase[index]], cur_epoch, writer, ncolumns)
+            # log_recons_image(None, 'val/amp_rec', [input_imgs_amplitude[index], output_amplitude[index]], cur_epoch, writer, ncolumns)
+            # log_recons_image(None, 'val/amp_heatmap', [input_imgs_amplitude[index], output_amplitude[index]], cur_epoch, writer, ncolumns, heatmap=True)
+            log_recons_image(data_config.dataset_name, 'val/img_rec', [input_imgs[index], output_imgs[index], correct_imgs[index]], cur_epoch, writer, ncolumns)
     return total_loss_dict['total_loss']
 
 

@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-28 22:34:31
-LastEditTime: 2024-04-15 11:41:05
+LastEditTime: 2024-04-17 11:26:02
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/models/model_utils.py
 '''
@@ -65,7 +65,7 @@ def load_model(result_path, device, best=False):
     model.enable_external()
     model.eval()
     print("Load the model successfully.")
-    if train_config.f_distortion:
+    if train_config.f_distortion.enable if hasattr(train_config.f_distortion, 'enable') else train_config.f_distortion:
         print('This model is trained with frequency distortion.')
         print('Loading the frequency distortion module ...')
         low_freq_image = torch.zeros(3, resolution, resolution)
