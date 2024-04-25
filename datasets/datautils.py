@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 14:56:44
-LastEditTime: 2024-04-03 18:14:03
+LastEditTime: 2024-04-23 16:45:22
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/datasets/datautils.py
 '''
@@ -20,21 +20,21 @@ def getNormalizeParameter(datasetname):
     if datasetname == '20-imagenet':
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     if datasetname == 'imagenet':
-        return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+        return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     if datasetname == 'celeba':
-        return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+        return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     if datasetname == 'cifar10':
-        return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+        return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     else:
         raise Exception('unknown dataset')
 
 def getImageSize(datasetname):
     if datasetname == '20-imagenet':
-        return 3, 256
+        return 3, 224
     if datasetname == 'imagenet':
-        return 3, 256
+        return 3, 224
     if datasetname == 'celeba':
-        return 3, 256
+        return 3, 224
     if datasetname == 'cifar10':
         return 3, 32
     else:
