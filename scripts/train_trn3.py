@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-04-12 10:36:00
-LastEditTime: 2024-04-25 19:38:47
+LastEditTime: 2024-05-10 16:03:43
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/train_trn3.py
 '''
@@ -50,7 +50,7 @@ def log_recons_image(datasetname, name, imagelist, steps, writer, ncolumns=4, he
             std1 = torch.tensor(std).view(1, -1, 1, 1).cuda()
             mean1 = torch.tensor(mean).view(1, -1, 1, 1).cuda()
         img_total = torch.tensor([]).cuda()
-        for _, img in enumerate(imagelist):
+        for i, img in enumerate(imagelist):
             img = img * std1 + mean1
             img_total = torch.cat([img_total, img], dim=0).clamp(0, 1)
         img = make_grid(img_total, ncolumns)
@@ -109,6 +109,7 @@ def process(train_config, img, model, basemodel, **kwargs):
 
     # adding distortion
     if train_config.f_distortion.enable:
+
         # get frequency distortion function
         assert 'low_freq_substitution' in kwargs, 'low_freq_substitution is None'
         assert 'high_noise' in kwargs, 'high_noise is None'
@@ -226,7 +227,11 @@ def train_one_epoch(basemodel, model, optimizer, train_dataloader, data_config, 
                 logger.info(loss_report)
 
                 # log the image
-                index = [ i * batch_size for i in range(ncolumns)]
+                if ncolumns > 1:
+                    index = [ i * batch_size for i in range(ncolumns)]
+                else:
+                    index = range(5)
+                    ncolumns = 5
                 log_recons_image(data_config.dataset_name, 'train/img_rec', [augmented_imgs[index], input_imgs[index], x_rec[index], correct_imgs[index]], global_steps, writer, ncolumns)
                 i = index[0]
                 for key in encoder_hook.keys():
@@ -324,7 +329,12 @@ def validation_one_epoch(basemodel, model, val_dataloader, data_config, train_co
             for key, value in total_loss_dict.items():
                 writer.add_scalar(f'val/{key}', value, cur_epoch)
             # log the image
-            index = [ i * batch_size for i in range(ncolumns)]
+            # log the image
+            if ncolumns > 1:
+                index = [ i * batch_size for i in range(ncolumns)]
+            else:
+                index = range(5)
+                ncolumns = 5
             log_recons_image(data_config.dataset_name, 'val/img_rec', [augmented_imgs[index], input_imgs[index], x_rec[index], correct_imgs[index]], cur_epoch, writer, ncolumns)
     return total_loss_dict['total_loss']
 
@@ -364,8 +374,8 @@ def main(args):
         logger.info(f"Resuming training from {args.resume_result}")
         if os.path.exists(args.resume_result):
             checkpoint = torch.load(args.resume_result)
-            data_config = checkpoint['data_config']
-            model_config = checkpoint['model_config']
+            data_config = DictToObject(checkpoint['data_config'])
+            model_config = DictToObject(checkpoint['model_config'])
             train_config = DictToObject(args.train_config)
             model_state = checkpoint['model']
             logger.info(f"{args.resume_result} loaded successfully")
@@ -444,7 +454,7 @@ def main(args):
     logger.info(
         f"Input channel: {ch_in}, resolution: {resolution}")
     basemodel = TeacherModel(model_name, resolution)
-    model = TRN(model_name, resolution)
+    model = TRN(model_name, resolution, model_config.gaussian_layer, model_config.gaussian_group_size)
     logger.info("Model initialized successfully")
 
     # optimizer and loss function setting

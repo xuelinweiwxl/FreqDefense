@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-21 14:56:44
-LastEditTime: 2024-04-23 16:45:22
+LastEditTime: 2024-04-27 11:46:53
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/datasets/datautils.py
 '''
@@ -23,7 +23,8 @@ def getNormalizeParameter(datasetname):
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     if datasetname == 'celeba':
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
-    if datasetname == 'cifar10':
+    if datasetname == 'cifar10': 
+        # return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     else:
         raise Exception('unknown dataset')

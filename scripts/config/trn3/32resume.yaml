@@ -5,24 +5,15 @@
 # LastEditors: xuelinwei xuelinwei@seu.edu.cn
 # FilePath: /FreqDefense/scripts/train.py
 
-resume: False
+resume: True
 random_seed: 981217
-result_name: 'trn3/test'
-data_config:
-  dataset_name: 'cifar10'
-  data_root: './data/'
-  batch_size: 128
-  num_workers: 8
-model_config:
-  model_name: 'resnet18'
-  gaussian_layer: True
-  gaussian_group_size: 3
+resume_result: 'trn3/test'
 train_config:
   distributed: False
   lr: 2.0e-4
   lr_decay_step: 1000
   lr_decay_rate: 5.0e-1
-  epochs: 500
+  epochs: 3000
   print_freq: 4
   masked:
     enable: False
@@ -31,14 +22,13 @@ train_config:
   blend:
     enable: False
   f_distortion:
-    enable: True
-    f_alpha: 0.1
+    enable: False
+    f_alpha: 0.15
     f_beta: 1
-    f_scale: 5
+    f_scale: 10
   feature_loss:
-    # - 'placeholder'
-    - 'l1'
-    # - 'ffl'
+    - 'placeholder'
+    # - 'l1'
   img_loss:
     - 'l1'
     - 'lpips'

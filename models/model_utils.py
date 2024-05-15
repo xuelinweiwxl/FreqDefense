@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-28 22:34:31
-LastEditTime: 2024-04-17 11:26:02
+LastEditTime: 2024-05-11 15:20:06
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/models/model_utils.py
 '''
@@ -16,7 +16,7 @@ sys.path.append('/data/wxl/code')
 from FreqDefense.datasets.datautils import getImageSize
 from FreqDefense.models.frae import FRAE
 from FreqDefense.utils.utils import Low_freq_substitution, addRayleigh_noise, DictToObject
-
+from FreqDefense.models.model2 import TRN
 
 # note that the result path should be the absolute path
 def load_model(result_path, device, best=False):
@@ -79,6 +79,59 @@ def load_model(result_path, device, best=False):
         return [model]
 
 # note that the result path should be the absolute path
+def load_model_trn(result_path, device, best=False):
+    # check the result path
+    if not os.path.exists(result_path):
+        raise Exception("The result path does not exist.")
+    
+    # check the config file
+    config_path = os.path.join(result_path, "config.yaml")
+    if not os.path.exists(config_path):
+        raise Exception("The config file does not exist.")
+    
+    if best:
+        # check the best model
+        if not os.path.exists(os.path.join(result_path, "best_model.pt")):
+            raise Exception("The best model does not exist.")
+        result_path = os.path.join(result_path, "best_model.pt")
+    else:
+        # check the last model
+        if not os.path.exists(os.path.join(result_path, "last_model.pt")):
+            raise Exception("The last model does not exist.")
+        result_path = os.path.join(result_path, "last_model.pt")
+    
+    # load the model
+    checkpoint = torch.load(result_path, map_location=device)
+    train_config = DictToObject(checkpoint['train_config'])
+    data_config = DictToObject(checkpoint['data_config'])
+    model_config = DictToObject(checkpoint['model_config'])
+    model_state = checkpoint['model']
+    print("Load the best model from %s" % result_path)
+    ch_in, resolution = getImageSize(data_config.dataset_name)
+    print(f"Note: the input dimension is {ch_in} x {resolution} x {resolution}")
+
+    model_name = model_config.model_name
+    model = TRN(model_name, resolution, model_config.gaussian_layer, model_config.gaussian_group_size)
+    # load the model state and send to the device
+    model.load_state_dict(model_state)
+    model = model.to(device)
+    model.enable_external()
+    model.eval()
+    print("Load the model successfully.")
+    if train_config.f_distortion.enable if hasattr(train_config.f_distortion, 'enable') else train_config.f_distortion:
+        print('This model is trained with frequency distortion.')
+        print('Loading the frequency distortion module ...')
+        low_freq_image = torch.zeros(3, resolution, resolution)
+        print(f'f_distortion is True, f_alpha: {train_config.f_distortion.f_alpha}, f_beta: {train_config.f_distortion.f_beta}')
+        low_freq_substitution = Low_freq_substitution(
+            resolution, resolution, ch_in, low_freq_image, data_config.batch_size, train_config.f_distortion.f_alpha, train_config.f_distortion.f_beta)
+        high_noise = addRayleigh_noise(resolution, resolution, ch_in, data_config.batch_size, train_config.f_distortion.f_alpha, train_config.f_distortion.f_scale)
+        print('Frequency distortion module loaded.')
+        return [model, low_freq_substitution, high_noise]
+    else:
+        return [model]
+
+# note that the result path should be the absolute path
 def recover(result_path, best=False):
     # check the result path
     if not os.path.exists(result_path):
@@ -121,16 +174,20 @@ def recover(result_path, best=False):
     print("The model is recovered successfully.")
 
 def test():
-    result_path = "/data/wxl/code/FreqDefense/results/2024_04_12_10_04"
+    result_path = "/data/wxl/code/FreqDefense/results/trn3/test"
     device = torch.device("cpu")
-    model_list = load_model(result_path, device, best=True)
+    model_list = load_model_trn(result_path, device, best=True)
     if len(model_list) >1:
         model, low_freq_sub, high_noise = model_list[0], model_list[1], model_list[2]
+    else:
+        model = model_list[0]
+        low_freq_sub = None
+        high_noise = None   
     from torchvision import transforms as tf
     from PIL import Image
     from matplotlib import pyplot as plt
-    mean = [0.5, 0.5, 0.5]
-    std = [0.5, 0.5, 0.5]
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
     to_tensor = tf.Compose([
         tf.Resize((32, 32)),
         tf.CenterCrop(32),
@@ -157,10 +214,20 @@ def test():
     test_data = test_data.detach().permute(1, 2, 0).numpy().clip(0, 1)
     plt.imshow(test_data)
     plt.show()
+    print(outputs.shape)
     for i in range(outputs.size(0)):
+        print(outputs[i][0])
+        print(outputs[i][1])
+        print(outputs[i][2])
+
         tensor = outputs[i,:,:,:].detach()
         tensor = tensor.squeeze(0)
         tensor = tensor * std + mean
+        print(tensor[0])
+        print(tensor[1])
+        print(tensor[2])
+        global a 
+        a = tensor
         tensor = tensor.detach().permute(1, 2, 0).numpy().clip(0, 1)
         plt.imshow(tensor)
         plt.show()

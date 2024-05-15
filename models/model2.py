@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-04-18 15:21:17
-LastEditTime: 2024-04-25 19:38:04
+LastEditTime: 2024-05-07 16:24:58
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/models/model2.py
 '''
@@ -28,8 +28,28 @@ description: the encoder and teacher model have same basic structure,
 HOOK_SIZE = {
     224: [56, 28, 14, 7],
     256: [64, 32, 16, 8],
-    32: [16, 8, 4]
+    32: [16, 8]
+    # 32: [16, 8, 4]
 }
+
+EMBEDING_RES = {
+    224: 7,
+    256: 8,
+    32: 4
+}
+
+EMBEDING_CH = {
+    32: {4: 256, 8: 128, 16: 64},
+}
+
+# downsample module
+class Downsample(nn.Module):
+    def __init__(self, channel):
+        super().__init__()
+        self.conv = nn.Conv2d(channel, channel, kernel_size=3, stride=2, padding=1)
+    
+    def forward(self, x):
+        return self.conv(x)
 
 # upsample module
 class Upsample(nn.Module):
@@ -313,7 +333,7 @@ class LaplacianFilter(nn.Module):
         return x
 
 # Encoder module
-class Encoder(BaseModel):
+class Encoder_old(BaseModel):
     '''
     description: using the same structure as the teacher model
     feature:
@@ -340,6 +360,8 @@ class Encoder(BaseModel):
             self.layer3 = self.model.layer3
             self.layer4 = self.model.layer4
             del self.model.fc
+
+
             
             if input_resolution == 32:
                 kernel_size = 3
@@ -379,10 +401,155 @@ class Encoder(BaseModel):
                 if i < len(self.hook_size):
                     # x = self.pass_gaussian(x, self.hook_size[i])
                     hook_result[self.hook_size[i]] = x
-            x = torch.flatten(x, 1)
+            # x = torch.flatten(x, 1)
         else:
             raise Exception("The model name is not supported.")
         return x, hook_result 
+
+# Encoder module
+'''
+There are three structure need to be filled
+1. different resolution
+2. different channel number
+3. different layer number
+first we only consider resnet18 and compare with it
+for resolution 32:
+    1. 16 x 16 x 64
+    2. 8 x 8 x 128
+    3. 4 x 4 x 256
+    4. 2 x 2 x 512
+for resolution 224:
+    1. 56 x 56 x 64
+    2. 28 x 28 x 128
+    3. 14 x 14 x 256
+    4. 7 x 7 x 512
+for resolution 256:
+    1. 64 x 64 x 64
+    2. 32 x 32 x 128
+    3. 16 x 16 x 256
+    4. 8 x 8 x 512
+'''
+class Encoder(nn.Module):
+    '''
+    description: using the same structure as the teacher model
+    feature:
+    1. add gaussian group filters between layers
+    2. add the hook function to save the intermediate feature maps
+    '''
+    def __init__(self, model_name:str, resolution:int,
+                 use_res:bool=True,
+                 gaussian_layer:bool=False,
+                 gaussian_group_size:int=3) -> None:
+        
+        self.gaussian_group_size = gaussian_group_size
+        self.gaussian_layer = gaussian_layer
+
+        super(Encoder, self).__init__()
+
+        if resolution in EMBEDING_RES.keys():
+            self.b_res = EMBEDING_RES[resolution]
+        else:
+            raise Exception(
+                "The resolution is not supported yet, please check it.")
+
+        self.hook_size = HOOK_SIZE[resolution]
+        if 'resnet' in model_name:
+            if int(model_name[6:]) <= 50:
+                self.base_ch = 64
+                self.max_ch = EMBEDING_CH[resolution][self.b_res]
+            else:
+                raise Exception("The model name is not supported.")
+        else:
+            raise Exception("The model name is not supported.")
+        
+        self.conv_in = nn.Conv2d(3, self.base_ch, kernel_size=3, stride=1, padding=1)
+        self.bn1 = nn.GroupNorm(32, self.base_ch)
+        self.relu = nn.SiLU()
+        if resolution != 32:
+            self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+            cur_res = resolution // 2
+        else:
+            self.maxpool = nn.Identity()
+            cur_res = resolution
+        cur_ch = self.base_ch
+        self.layer_count = 1
+        self.hook_modules = {}
+        self.hook_channel = {}
+        
+        while cur_res != self.b_res or cur_ch != self.max_ch:
+            blocks = []
+            if self.layer_count == 1:
+                b_in = cur_ch
+                b_out = cur_ch
+            else:
+                if cur_ch < self.max_ch:
+                    b_in = cur_ch
+                    b_out = cur_ch * 2
+                else:
+                    b_in = cur_ch
+                    b_out = cur_ch
+            if use_res:
+                blocks.append(ResBlock(b_in, b_out))
+            else:
+                blocks.append(ConvBlock(b_in, b_out))
+            
+            if cur_res != self.b_res:
+                blocks.append(Downsample(b_out))
+                cur_res = cur_res // 2  
+            else:
+                cur_res = cur_res
+            layer = nn.Sequential(*blocks)
+            self.register_module(f'layer{self.layer_count}', layer)
+            cur_ch = b_out
+            if cur_res in self.hook_size:
+                self.hook_modules[layer] = cur_res
+                self.hook_channel[cur_res] = cur_ch
+            self.layer_count += 1
+
+        self.zsize = cur_ch * cur_res * cur_res
+
+        if self.gaussian_layer:
+            if resolution == 32:
+                kernel_size = 3
+            else:
+                kernel_size = 5
+            for size in self.hook_size:
+                for i in range(gaussian_group_size):
+                    self.register_module(f'gaussian{size}_{i}', GuassianFilter(kernel_size, self.hook_channel[size]))
+                    self.register_module(f'laplacian{size}_{i}', LaplacianFilter(kernel_size, self.hook_channel[size]))
+                self.register_module(f'recover_{size}', ConvBlock(self.hook_channel[size] * (gaussian_group_size * 2 + 1), self.hook_channel[size]))
+        
+    
+    def forward(self, x: Tensor) -> Tensor:
+        hook_result = {}
+        x = self.conv_in(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+        for i in range(1, self.layer_count):
+            module = self.__getattr__(f'layer{i}')
+            x = module(x)
+            if module in self.hook_modules.keys():
+                if self.gaussian_layer:
+                    x = self.pass_gaussian(x, self.hook_modules[module])
+                hook_result[self.hook_modules[module]] = x
+        return x, hook_result
+    
+    def pass_gaussian(self, x: Tensor, size: int) -> Tensor:
+        '''
+        TODO: maybe add a conv layer here for better ulitization of the filters
+        '''
+        temp = []
+        temp.append(x)
+        for i in range(self.gaussian_group_size):
+            temp.append(self.__getattr__(f'gaussian{size}_{i}')(x))
+            temp.append(self.__getattr__(f'laplacian{size}_{i}')(x))
+        x = torch.cat(temp, dim=1)
+        x = self.__getattr__(f'recover_{size}')(x)
+        return x
+
+        
+
 
 # Decoder module
 class Decoder(nn.Module):
@@ -406,12 +573,8 @@ class Decoder(nn.Module):
         super().__init__()
 
         # the settings of the img size of hooked layers and base channel number
-        if resolution == 32:
-            self.b_res = 2
-        elif resolution == 224:
-            self.b_res = 7
-        elif resolution == 256:
-            self.b_res = 8
+        if resolution in EMBEDING_RES.keys():
+            self.b_res = EMBEDING_RES[resolution]
         else:
             raise Exception(
                 "The resolution is not supported yet, please check it.")
@@ -422,11 +585,20 @@ class Decoder(nn.Module):
         self.hook_modules = {}
         self.max_ch = max_ch
         self.base_ch = base_ch
+        self.ch_in = ch_in
         
         # initialize the first layer
         cur_res = self.b_res
         cur_ch = self.max_ch
-        self.fc_in = nn.Linear(ch_in, cur_res * cur_res * cur_ch)
+
+        # TODO: check whether we need to remove fc_in
+        # self.fc_in = nn.Linear(ch_in, cur_res * cur_res * cur_ch)
+        import math
+        self.view_res = int(math.sqrt(ch_in / max_ch))
+        # print(self.view_res)
+        # self.conv_in = nn.Conv2d(max_ch, max_ch, kernel_size=3, stride=1, padding=1)
+
+
         self.layer1 = nn.Conv2d(
             cur_ch, cur_ch, kernel_size=3, stride=1, padding=1)
         self.gn = nn.GroupNorm(32, cur_ch)
@@ -462,11 +634,15 @@ class Decoder(nn.Module):
         self.conv_out = nn.Conv2d(
             self.base_ch, ch_out, kernel_size=3, stride=1, padding=1)
     
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, external:bool= False) -> Tensor:
         hook_result = {}
-        x = self.fc_in(x)
+        # TODO: maybe from here, the image begain
+        # x = self.fc_in(x)
+        # x = x.view(-1, self.max_ch, self.view_res, self.view_res)
+        # x = self.conv_in(x)
+
         # reshape
-        x = x.view(-1, self.max_ch, self.b_res, self.b_res)
+        # x = x.view(-1, self.max_ch, self.b_res, self.b_res)
         # pass through the first layer
         x = self.layer1(x)
         x = self.gn(x)
@@ -484,22 +660,42 @@ class Decoder(nn.Module):
                 raise Exception("This layer{i} is not a valid torch module.")
         x = self.conv_out(x)
         # TODO: check whether we need to add the last activation function 
-        x = self.silu(x)
+        # x = self.silu(x)
         return x, hook_result
 
     def __repr__(self):
         return f'Decoder with {self.layer_count} layer.'
     
 class TRN(nn.Module):
-    def __init__(self, model_name: str, resolution: int) -> None:
+    def __init__(self, model_name: str, resolution: int,
+                 gaussian_layer:bool=False,
+                 gaussian_group_size:int=3) -> None:
         super().__init__()
-        self.encoder = Encoder(model_name, resolution)
+        self.encoder = Encoder(model_name, resolution, True, gaussian_layer, gaussian_group_size)
         self.decoder = Decoder(self.encoder.zsize, resolution, self.encoder.max_ch, self.encoder.base_ch)
-        
+        self.external = False
+
+    def enable_external(self):
+        self.external = True
+
     def forward(self, x: Tensor) -> Tensor:
-        z, encoder_hook = self.encoder(x)
-        x_rec, decoder_hook = self.decoder(z)
-        return x_rec, encoder_hook, decoder_hook
+        if self.external:
+            squeeze = False
+            x_device = x.device
+            if len(x.shape) < 4:
+                    x = x.unsqueeze(0)
+                    squeeze = True
+            x = x.to(self.encoder.conv_in.weight.device)
+            z, encoder_hook = self.encoder(x)
+            x_rec, decoder_hook = self.decoder(z)
+            if squeeze:
+                x, x_rec = x.squeeze(0), x_rec.squeeze(0)
+            x, x_rec = x.to(x_device), x_rec.to(x_device)
+            return x_rec
+        else:
+            z, encoder_hook = self.encoder(x)
+            x_rec, decoder_hook = self.decoder(z)
+            return x_rec, encoder_hook, decoder_hook
 
 def test_decoder():
     test_in = torch.randn([1,1,2048])
@@ -640,9 +836,16 @@ def test():
 if __name__ == '__main__':
     # test_laplacian_filter()
     # test()
-    res = Encoder('resnet18', 32)
+    res = 32
+    test_in_size = (1, 3, res, res)
+    # model = TeacherModel('resnet18', res)
+    # print(summary(model, test_in_size))
+    model2 = Encoder('resnet18', res)
+    model3 = Decoder(model2.zsize, res, model2.max_ch, model2.base_ch)
+    test_in_size2 = (1, model2.max_ch, EMBEDING_RES[res], EMBEDING_RES[res])
     from torchinfo import summary
-    print(summary(res, (1, 3, 32, 32)))
+    print(summary(model2, test_in_size))
+    print(summary(model3, test_in_size2))
     # test_decoder()
     # test_gaussian_filter()
     # test_encoder()
