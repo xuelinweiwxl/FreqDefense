@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-04-12 10:36:00
-LastEditTime: 2024-05-10 16:03:43
+LastEditTime: 2024-05-15 11:06:27
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/train_trn3.py
 '''
