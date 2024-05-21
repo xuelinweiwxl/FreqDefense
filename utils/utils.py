@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-03-25 10:36:30
-LastEditTime: 2024-04-15 11:44:19
+LastEditTime: 2024-05-15 11:41:29
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/utils/utils.py
 '''
@@ -82,6 +82,8 @@ class Low_freq_substitution(nn.Module):
             for j in range(self.input_width):
                 if (i-center[0])**2 + (j-center[1])**2 <= radius**2:
                     mask[:,i,j] = 1
+        if mask.device != self.mask.device:
+            mask = mask.to(self.mask.device)
         self.mask = mask
     
     def update(self, low_freq_image: Tensor) -> None:

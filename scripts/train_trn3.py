@@ -2,7 +2,7 @@
 Author: Xuelin Wei
 Email: xuelinwei@seu.edu.cn
 Date: 2024-04-12 10:36:00
-LastEditTime: 2024-05-15 11:06:27
+LastEditTime: 2024-05-15 15:18:10
 LastEditors: xuelinwei xuelinwei@seu.edu.cn
 FilePath: /FreqDefense/scripts/train_trn3.py
 '''
@@ -107,6 +107,12 @@ def process(train_config, img, model, basemodel, **kwargs):
     augmented_imgs = torch.cat(augmented_imgs, dim=0)
     correct_imgs = torch.cat(correct_imgs, dim=0)
 
+    augmented_img = augmented_imgs
+    correct_img = correct_imgs
+    augmented_imgs = []
+    correct_imgs = []
+    input_imgs_f = []
+
     # adding distortion
     if train_config.f_distortion.enable:
 
@@ -115,17 +121,42 @@ def process(train_config, img, model, basemodel, **kwargs):
         assert 'high_noise' in kwargs, 'high_noise is None'
         low_freq_substitution = kwargs['low_freq_substitution']
         high_noise = kwargs['high_noise']
+        
+        # choose random f_alpha and f_scale for 20 rounds
+        ncolumns = 10
+        for _ in range(10):
+            f_alpha = random.uniform(0.1, train_config.f_distortion.f_alpha)
+            f_scale = random.uniform(1, train_config.f_distortion.f_scale)
 
-        # add distortion to the image
-        input_imgs_f = low_freq_substitution(augmented_imgs)
-        input_imgs_f = high_noise(input_imgs_f)
-        input_imgs = input_imgs_f
+            # update the distortion function
+            low_freq_substitution.update_alpha(f_alpha)
+            high_noise.update_alpha(f_alpha)
+            high_noise.update_scale(f_scale)
+
+            # add distortion to the image
+            input_img_f = low_freq_substitution(augmented_img)
+            input_img_f = high_noise(input_img_f)
+            input_imgs_f.append(input_img_f)
+
+            # add the correct image
+            correct_imgs.append(correct_img)
+            augmented_imgs.append(augmented_img)
+        
+        augmented_imgs = torch.cat(augmented_imgs, dim=0)
+        correct_imgs = torch.cat(correct_imgs, dim=0)
+        input_imgs = torch.cat(input_imgs_f, dim=0)
     else:
+        augmented_imgs = torch.cat(augmented_imgs, dim=0)
+        correct_imgs = torch.cat(correct_imgs, dim=0)
         input_imgs = augmented_imgs
-    
+
+
     # get intermediate output of the base model
     # model_hook is a dictionary, the key is the img size and value if the intermediate output
-    model_hook = basemodel(correct_imgs)
+    if basemodel is not None:
+        model_hook = basemodel(correct_imgs)
+    else:
+        model_hook = None
     
     # get the output of the model
     x_rec, encoder_hook, decoder_hook = model(input_imgs)
@@ -135,11 +166,13 @@ def process(train_config, img, model, basemodel, **kwargs):
 
 def train_one_epoch(basemodel, model, optimizer, train_dataloader, data_config, train_config, accelerator, writer, logger, cur_epoch, **kwargs):
     model.train()
-    basemodel.to(accelerator.device)
+    if basemodel is not None:
+        basemodel.to(accelerator.device)
     print_steps = len(train_dataloader) // train_config.print_freq
 
     for i, (img, _) in tqdm(enumerate(train_dataloader)):
-        basemodel.eval()
+        if basemodel is not None:
+            basemodel.eval()
         optimizer.zero_grad()
     
         global_steps = cur_epoch * len(train_dataloader) + i
@@ -157,26 +190,27 @@ def train_one_epoch(basemodel, model, optimizer, train_dataloader, data_config, 
         loss_dict_rec = {}
         
         # calculate the ffl loss between the intermediate output of encoder, decoder and the base model
-        for key, value in encoder_hook.items():
-            if 'l1' in train_config.feature_loss:
-                if 'rec' in train_config.feature_loss:
-                    loss1 = torch.nn.L1Loss()(value, decoder_hook[key])
-                    loss_rec += loss1
-                    loss_dict_rec[key] = loss1
-                loss2 = torch.nn.L1Loss()(value, model_hook[key])
-                loss_feature += loss2
-                loss_dict_feature[key] = loss2
-            if 'ffl' in train_config.feature_loss:
-                if 'rec' in train_config.feature_loss:
-                    loss1 = FFL(value, decoder_hook[key])
-                    loss_rec += loss1
-                    loss_dict_rec[key] = loss1
-                loss2 = FFL(value, model_hook[key])
-                loss_feature += loss2
-                loss_dict_feature[key] = loss2
+        if basemodel is not None:
+            for key, value in encoder_hook.items():
+                if 'l1' in train_config.feature_loss:
+                    if 'rec' in train_config.feature_loss:
+                        loss1 = torch.nn.L1Loss()(value, decoder_hook[key])
+                        loss_rec += loss1
+                        loss_dict_rec[key] = loss1
+                    loss2 = torch.nn.L1Loss()(value, model_hook[key])
+                    loss_feature += loss2
+                    loss_dict_feature[key] = loss2
+                if 'ffl' in train_config.feature_loss:
+                    if 'rec' in train_config.feature_loss:
+                        loss1 = FFL(value, decoder_hook[key])
+                        loss_rec += loss1
+                        loss_dict_rec[key] = loss1
+                    loss2 = FFL(value, model_hook[key])
+                    loss_feature += loss2
+                    loss_dict_feature[key] = loss2
         
         if 'l1' in train_config.img_loss:
-            loss_img_l1 = torch.nn.L1Loss()(x_rec, correct_imgs)
+            loss_img_l1 = torch.nn.L1Loss()(x_rec, correct_imgs) * train_config.img_loss_weight
             loss_img += loss_img_l1
             loss_dict_img['loss_img_l1'] = loss_img_l1
         if 'lpips' in train_config.img_loss:
@@ -235,7 +269,8 @@ def train_one_epoch(basemodel, model, optimizer, train_dataloader, data_config, 
                 log_recons_image(data_config.dataset_name, 'train/img_rec', [augmented_imgs[index], input_imgs[index], x_rec[index], correct_imgs[index]], global_steps, writer, ncolumns)
                 i = index[0]
                 for key in encoder_hook.keys():
-                    log_recons_image(None, f'train_feature_{key}/model', [model_hook[key][i].unsqueeze(1)], global_steps, writer, ncolumns)
+                    if basemodel is not None:
+                        log_recons_image(None, f'train_feature_{key}/model', [model_hook[key][i].unsqueeze(1)], global_steps, writer, ncolumns)
                     log_recons_image(None, f'train_feature_{key}/encoder', [encoder_hook[key][i].unsqueeze(1)], global_steps, writer, ncolumns)
                     log_recons_image(None, f'train_feature_{key}/decoder', [decoder_hook[key][i].unsqueeze(1)], global_steps, writer, ncolumns)
 
@@ -244,7 +279,8 @@ def train_one_epoch(basemodel, model, optimizer, train_dataloader, data_config, 
 def validation_one_epoch(basemodel, model, val_dataloader, data_config, train_config, accelerator, writer, logger, cur_epoch, **kwargs):
     device = accelerator.device
     model.eval()
-    basemodel.eval()
+    if basemodel is not None:
+        basemodel.eval()
 
     # total loss dict for gathering all the loss
     total_loss_dict = {}
@@ -262,28 +298,29 @@ def validation_one_epoch(basemodel, model, val_dataloader, data_config, train_co
             FFL = kwargs['FFL']
 
             # calculate the ffl loss between the intermediate output of encoder, decoder and the base model
-            for key, value in encoder_hook.items():
-                if 'l1' in train_config.feature_loss:
-                    if 'rec' in train_config.feature_loss:
-                        loss1 = torch.nn.L1Loss()(value, decoder_hook[key])
-                        total_loss_dict['total_loss_rec'] += loss1 * input_imgs.shape[0]
-                        total_loss_dict['total_loss'] += loss1 * input_imgs.shape[0]
-                    loss2 = torch.nn.L1Loss()(value, model_hook[key])
-                    total_loss_dict['loss_dict_feature'] += loss2 * input_imgs.shape[0]
-                    total_loss_dict['total_loss'] += loss2 * input_imgs.shape[0]
-                if 'ffl' in train_config.feature_loss:
-                    if 'rec' in train_config.feature_loss:
-                        loss1 = FFL(value, decoder_hook[key])
-                        total_loss_dict['total_loss_rec'] += loss1 * input_imgs.shape[0]
-                        total_loss_dict['total_loss'] += loss1 * input_imgs.shape[0]
-                    loss2 = FFL(value, model_hook[key])
-                    total_loss_dict['loss_dict_feature'] += loss2 * input_imgs.shape[0]
-                    total_loss_dict['total_loss'] += loss2 * input_imgs.shape[0]
+            if basemodel is not None:
+                for key, value in encoder_hook.items():
+                    if 'l1' in train_config.feature_loss:
+                        if 'rec' in train_config.feature_loss:
+                            loss1 = torch.nn.L1Loss()(value, decoder_hook[key])
+                            total_loss_dict['total_loss_rec'] += loss1 * input_imgs.shape[0]
+                            total_loss_dict['total_loss'] += loss1 * input_imgs.shape[0]
+                        loss2 = torch.nn.L1Loss()(value, model_hook[key])
+                        total_loss_dict['loss_dict_feature'] += loss2 * input_imgs.shape[0]
+                        total_loss_dict['total_loss'] += loss2 * input_imgs.shape[0]
+                    if 'ffl' in train_config.feature_loss:
+                        if 'rec' in train_config.feature_loss:
+                            loss1 = FFL(value, decoder_hook[key])
+                            total_loss_dict['total_loss_rec'] += loss1 * input_imgs.shape[0]
+                            total_loss_dict['total_loss'] += loss1 * input_imgs.shape[0]
+                        loss2 = FFL(value, model_hook[key])
+                        total_loss_dict['loss_dict_feature'] += loss2 * input_imgs.shape[0]
+                        total_loss_dict['total_loss'] += loss2 * input_imgs.shape[0]
 
             if 'l1' in train_config.img_loss:
                 if 'total_loss_img_l1' not in total_loss_dict.keys():
                     total_loss_dict['total_loss_img_l1'] = torch.tensor(0.0).to(device)
-                loss_img_l1 = torch.nn.L1Loss()(x_rec, correct_imgs)
+                loss_img_l1 = torch.nn.L1Loss()(x_rec, correct_imgs) * train_config.img_loss_weight
                 total_loss_dict['total_loss_img_l1'] += loss_img_l1  * x_rec.shape[0]
                 total_loss_dict['total_loss_img'] += loss_img_l1  * x_rec.shape[0]
                 total_loss_dict['total_loss'] += loss_img_l1  * x_rec.shape[0]
@@ -453,15 +490,20 @@ def main(args):
     logger.info("Initializing model...")
     logger.info(
         f"Input channel: {ch_in}, resolution: {resolution}")
-    basemodel = TeacherModel(model_name, resolution)
+    if 'placeholder' in train_config.feature_loss:
+        basemodel = None
+    else:
+        basemodel = TeacherModel(model_name, resolution)
     model = TRN(model_name, resolution, model_config.gaussian_layer, model_config.gaussian_group_size)
     logger.info("Model initialized successfully")
 
     # optimizer and loss function setting
     optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer, step_size=train_config.lr_decay_step, gamma=train_config.lr_decay_rate)
+    # scheduler = torch.optim.lr_scheduler.StepLR(
+    #     optimizer, step_size=train_config.lr_decay_step, gamma=train_config.lr_decay_rate)
     
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_config.epochs*0.2, eta_min=0.01*train_config.lr)
+
     # lpips loss
     if 'lpips' in train_config.img_loss or 'lpips' in train_config.feature_loss:
         lpips = LPIPS(net='vgg')
@@ -565,5 +607,7 @@ if __name__ ==  "__main__":
                         help="path to save outputs (ckpt, tensorboard runs)")
     parser.add_argument("--config_path", type=str,
                         default='./scripts/config/trn3/32config.yaml', help="path to config file")
+    # parser.add_argument("--config_path", type=str,
+    #                     default='./scripts/config/trn3/32resume.yaml', help="path to config file")
     args = parser.parse_args()
     main(args)

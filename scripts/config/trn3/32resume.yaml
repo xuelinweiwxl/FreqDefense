@@ -10,10 +10,10 @@ random_seed: 981217
 resume_result: 'trn3/test'
 train_config:
   distributed: False
-  lr: 2.0e-4
+  lr: 2.0e-5
   lr_decay_step: 1000
   lr_decay_rate: 5.0e-1
-  epochs: 3000
+  epochs: 800
   print_freq: 4
   masked:
     enable: False
@@ -22,13 +22,14 @@ train_config:
   blend:
     enable: False
   f_distortion:
-    enable: False
-    f_alpha: 0.15
+    enable: True
+    f_alpha: 0.3
     f_beta: 1
-    f_scale: 10
+    f_scale: 30
   feature_loss:
-    - 'placeholder'
-    # - 'l1'
+    # - 'placeholder'
+    - 'l1'
+    # - 'ffl'
   img_loss:
     - 'l1'
     - 'lpips'
