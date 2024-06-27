@@ -134,7 +134,7 @@ class Low_freq_substitution(nn.Module):
         return f"low_freq_substitution(alpha={self.alpha}, beta={self.beta})"
     
 class addRayleigh_noise(nn.Module):
-    def __init__(self, input_height, input_width, channel, batch_size, alpha=0.15, scale=1):
+    def __init__(self, input_height, input_width, channel, batch_size, alpha=0.15, scale=1, gaussain=False):
         super(addRayleigh_noise, self).__init__()
         _log_api_usage_once(self)
         
@@ -144,6 +144,7 @@ class addRayleigh_noise(nn.Module):
         self.channel = channel
         self.batch_size = batch_size
         self.scale = scale
+        self.gaussain = gaussain
 
         center = ((input_height-1)/2, (input_width-1)/2)
         max_radius = min(
@@ -177,10 +178,16 @@ class addRayleigh_noise(nn.Module):
         tensor_fft = fftshift(tensor_fft, dim=(-2, -1))
         tensor_amplitude = torch.abs(tensor_fft)
         tensor_phase = torch.angle(tensor_fft)
+
+        mean = torch.mean(tensor_amplitude).detach().cpu().numpy() * self.scale
         
         # generate the noise
-        noise = np.random.rayleigh(self.scale, tensor.shape)
-        noise = torch.tensor(noise, dtype=torch.float32)
+        if self.gaussain:
+            noise = torch.randn(tensor.shape) * mean
+        else:
+            scale = np.sqrt(2 / np.pi) * mean
+            noise = np.random.rayleigh(scale, tensor.shape)
+            noise = torch.tensor(noise, dtype=torch.float32)
         noise = noise.to(tensor.device)
 
         if len(tensor.shape) > 3:
@@ -203,7 +210,7 @@ class addRayleigh_noise(nn.Module):
         return self.forward(tensor)
 
     def __repr__(self) -> str:
-        return f"low_freq_substitution(alpha={self.alpha}, beta={self.beta})"
+        return f"high_frequency(alpha={self.alpha}, beta={self.beta})"
 
 # create a new class to mask the certain area of the image
 class MaskAdder(nn.Module):
@@ -226,9 +233,15 @@ class MaskAdder(nn.Module):
             mask[:, :, x.shape[2]-size:, 0:size] = 0
         elif pos == 'rb':
             mask[:, :, x.shape[2]-size:, x.shape[3]-size:] = 0
+        elif pos == 'random':
+            left_top = (np.random.randint(0, x.shape[2]-size), np.random.randint(0, x.shape[3]-size))
+            mask[:, :, left_top[0]:left_top[0]+size, left_top[1]:left_top[1]+size] = 0
         elif pos == 'all':
             x = torch.cat([self.forward(x, 'lt', size), self.forward(x, 'rt', size), self.forward(x, 'lb', size), self.forward(x, 'rb', size), self.forward(x, 'center', size)], dim=0)
             return x
+        elif pos == 'randomall':
+           x = torch.cat([self.forward(x, 'random', size), self.forward(x, 'random', size), self.forward(x, 'random', size), self.forward(x, 'random', size), self.forward(x, 'random', size)], dim=0)
+           return x
         else:
             raise ValueError('the position is not supported')
         return x * mask + torch.ones_like(x) * (1-mask)
@@ -311,7 +324,7 @@ def test_mask():
     dataloader.dataset.transform = trans
     for x, y in tqdm(dataloader):
         maskadder = MaskAdder()
-        x_masked = maskadder(x, 'all', 4)
+        x_masked = maskadder(x, 'randomall', 10)
         x = make_grid(torch.cat([x,x_masked]), 8)
         plt.imshow(toPIL(x))
         break
@@ -323,9 +336,9 @@ def test_lh():
     import torchvision.transforms as T
     import numpy as np
     import torch
-    size = 256
+    size = 244
     # load the image
-    img = Image.open('/data/wxl/code/FreqDefense/test.png')
+    img = Image.open('/data/wxl/code/FreqDefense/test244.JPEG')
     # img = Image.open('/data/wxl/code/FreqDefense/data/20-imagenet/train/n03404251/n03404251_530.JPEG')
     # transform the image
     transform = T.Compose([
@@ -339,28 +352,30 @@ def test_lh():
     ])
     img = transform(img).unsqueeze(0)
     # lw = Image.open('../data/20-imagenet/train/n02860847/n02860847_8.JPEG')
-    lw = Image.open('/data/wxl/code/FreqDefense/test3.png')
+    lw = Image.open('/data/wxl/code/FreqDefense/test2442.JPEG')
     lw = transform(lw)
-    alpha = 0.2
+    alpha = 0.1
     lows = Low_freq_substitution(size, size, 3, lw, 1, alpha, 1)
-    for i in range(1,10):
-        scale = i*10
-        high = addRayleigh_noise(size, size, 3, 1, alpha, scale)
-        o = lows(img)
-        o = high(o)
-        # print(o.shape)
-        # print(img[0,0,:,:])
-        # print(o[0,0,:,:])
-        # show the image from one batch
-        import matplotlib.pyplot as plt
-        a = denormalize(img[0,:,:,:]).permute(1,2,0)
-        b = denormalize(o[0,:,:,:]).permute(1,2,0)
-        print(scale)
-        plt.imshow(a.clamp(0,1))
-        plt.show()
-        plt.imshow(b.clamp(0,1))
-        plt.show()
+    scales = np.linspace(0, 20, 5)
+    for scale in scales:
+        for gaussain in [True, False]:
+            high = addRayleigh_noise(size, size, 3, 1, alpha, scale, gaussain=gaussain)
+            o = lows(img)
+            o = high(o)
+            # print(o.shape)
+            # print(img[0,0,:,:])
+            # print(o[0,0,:,:])
+            # show the image from one batch
+            import matplotlib.pyplot as plt
+            a = denormalize(img[0,:,:,:]).permute(1,2,0)
+            b = denormalize(o[0,:,:,:]).permute(1,2,0)
+            print(scale)
+            plt.imshow(a.clamp(0,1))
+            plt.show()
+            plt.imshow(b.clamp(0,1))
+            plt.show()
 
 if __name__ == '__main__':
     # test_mask()
-    test_blended()
+    # test_blended()
+    test_lh()

@@ -7,27 +7,27 @@
 
 resume: True
 random_seed: 981217
-resume_result: 'trn3/test'
+resume_result: 'trn3-224/test'
 train_config:
   distributed: False
-  lr: 2.0e-4
+  lr: 2.0e-5
   # the lr is slightly larger
   lr_decay_step: 200
   lr_decay_rate: 5.0e-1
-  epochs: 100
+  epochs: 400
   print_freq: 4
   masked:
-    enable: False
-    method: 'all'
-    size: 10
+    enable: True
+    method: 'randomall'
+    size: 60
   blend:
     enable: False
   f_distortion:
     enable: True
-    add_self: True
-    f_alpha: 0.2
+    add_self: False
+    f_alpha: 0.1
     f_beta: 1
-    f_scale: 10
+    f_scale: 500
   feature_loss:
     - 'placeholder'
     # - 'l1'
@@ -36,5 +36,5 @@ train_config:
     - 'l1'
     - 'lpips'
     - 'ffl'
-  img_loss_weight: 2.0
+  img_loss_weight: 1.0
   ffl_weight: 1.0

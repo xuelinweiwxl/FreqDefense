@@ -11,7 +11,7 @@ result_name: 'trn3/test'
 data_config:
   dataset_name: 'cifar10'
   data_root: './data/'
-  batch_size: 128
+  batch_size: 32
   num_workers: 8
 model_config:
   model_name: 'resnet18'
@@ -21,21 +21,22 @@ train_config:
   distributed: False
   lr: 2.0e-4
   # the lr is slightly larger
-  # lr_decay_step: 200
-  # lr_decay_rate: 5.0e-1
-  epochs: 400
+  lr_decay_step: 1000
+  lr_decay_rate: 5.0e-1
+  epochs: 100
   print_freq: 4
   masked:
-    enable: False
-    method: 'all'
-    size: 5
+    enable: True
+    method: 'randomall'
+    size: 10
   blend:
     enable: False
   f_distortion:
     enable: True
-    f_alpha: 0.3
+    add_self: False
+    f_alpha: 0.2
     f_beta: 1
-    f_scale: 30
+    f_scale: 10
   feature_loss:
     - 'placeholder'
     # - 'l1'
@@ -44,5 +45,5 @@ train_config:
     - 'l1'
     - 'lpips'
     - 'ffl'
-  img_loss_weight: 5.0
+  img_loss_weight: 2.0
   ffl_weight: 1.0

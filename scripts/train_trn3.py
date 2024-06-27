@@ -82,7 +82,7 @@ def process(train_config, img, model, basemodel, **kwargs):
         method = train_config.masked.method
         masked_img = mask_adder(img, method, train_config.masked.size)
         augmented_imgs.append(masked_img)
-        if method == 'all':
+        if method == 'all' or method == 'randomall':
             correct_imgs.append(img.repeat(5,1,1,1))
             ncolumns += 5
         else:
@@ -109,12 +109,18 @@ def process(train_config, img, model, basemodel, **kwargs):
 
     augmented_img = augmented_imgs
     correct_img = correct_imgs
-    augmented_imgs = []
-    correct_imgs = []
-    input_imgs_f = []
 
     # adding distortion
+    f_size = 1
     if train_config.f_distortion.enable:
+        if train_config.f_distortion.add_self:
+            augmented_imgs = [augmented_img]
+            correct_imgs = [correct_img]
+            input_imgs_f = [augmented_img]
+        else:
+            augmented_imgs = []
+            correct_imgs = []
+            input_imgs_f = []
 
         # get frequency distortion function
         assert 'low_freq_substitution' in kwargs, 'low_freq_substitution is None'
@@ -123,10 +129,10 @@ def process(train_config, img, model, basemodel, **kwargs):
         high_noise = kwargs['high_noise']
         
         # choose random f_alpha and f_scale for 20 rounds
-        ncolumns = 10
-        for _ in range(10):
-            f_alpha = random.uniform(0.1, train_config.f_distortion.f_alpha)
-            f_scale = random.uniform(1, train_config.f_distortion.f_scale)
+        for _ in range(f_size):
+            f_alpha = random.uniform(0.3, train_config.f_distortion.f_alpha)
+            # f_alpha = train_config.f_distortion.f_alpha
+            f_scale = random.uniform(2, train_config.f_distortion.f_scale)
 
             # update the distortion function
             low_freq_substitution.update_alpha(f_alpha)
@@ -146,10 +152,7 @@ def process(train_config, img, model, basemodel, **kwargs):
         correct_imgs = torch.cat(correct_imgs, dim=0)
         input_imgs = torch.cat(input_imgs_f, dim=0)
     else:
-        augmented_imgs = torch.cat(augmented_imgs, dim=0)
-        correct_imgs = torch.cat(correct_imgs, dim=0)
         input_imgs = augmented_imgs
-
 
     # get intermediate output of the base model
     # model_hook is a dictionary, the key is the img size and value if the intermediate output
@@ -268,11 +271,11 @@ def train_one_epoch(basemodel, model, optimizer, train_dataloader, data_config, 
                     ncolumns = 5
                 log_recons_image(data_config.dataset_name, 'train/img_rec', [augmented_imgs[index], input_imgs[index], x_rec[index], correct_imgs[index]], global_steps, writer, ncolumns)
                 i = index[0]
-                for key in encoder_hook.keys():
-                    if basemodel is not None:
+                if basemodel is not None:
+                    for key in encoder_hook.keys():
                         log_recons_image(None, f'train_feature_{key}/model', [model_hook[key][i].unsqueeze(1)], global_steps, writer, ncolumns)
-                    log_recons_image(None, f'train_feature_{key}/encoder', [encoder_hook[key][i].unsqueeze(1)], global_steps, writer, ncolumns)
-                    log_recons_image(None, f'train_feature_{key}/decoder', [decoder_hook[key][i].unsqueeze(1)], global_steps, writer, ncolumns)
+                        log_recons_image(None, f'train_feature_{key}/encoder', [encoder_hook[key][i].unsqueeze(1)], global_steps, writer, ncolumns)
+                        log_recons_image(None, f'train_feature_{key}/decoder', [decoder_hook[key][i].unsqueeze(1)], global_steps, writer, ncolumns)
 
 
 
@@ -499,10 +502,10 @@ def main(args):
 
     # optimizer and loss function setting
     optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
-    # scheduler = torch.optim.lr_scheduler.StepLR(
-    #     optimizer, step_size=train_config.lr_decay_step, gamma=train_config.lr_decay_rate)
+    scheduler = torch.optim.lr_scheduler.StepLR(
+        optimizer, step_size=train_config.lr_decay_step, gamma=train_config.lr_decay_rate)
     
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_config.epochs*0.2, eta_min=0.01*train_config.lr)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_config.epochs*0.2, eta_min=0.01*train_config.lr)
 
     # lpips loss
     if 'lpips' in train_config.img_loss or 'lpips' in train_config.feature_loss:
@@ -515,7 +518,10 @@ def main(args):
     #     FFL = FocalFrequencyLoss(train_config.ffl_weight, alpha=1.0)
     # else:
     #     FFL = None
-    FFL = FocalFrequencyLoss(train_config.ffl_weight, alpha=1.0)
+    # if 'myffl' in train_config.img_loss or 'myffl' in train_config.feature_loss:
+    # FFL = freq_loss(train_config.ffl_weight)
+    # else:
+    FFL = FocalFrequencyLoss(train_config.ffl_weight, alpha=1.0, log_matrix=True)
 
     # TODO: resume need to change according to save function
     if 'resume' in args.__dict__ and args.resume:
@@ -606,8 +612,8 @@ if __name__ ==  "__main__":
     parser.add_argument("--result_dir", type=str, default='./results',
                         help="path to save outputs (ckpt, tensorboard runs)")
     parser.add_argument("--config_path", type=str,
-                        default='./scripts/config/trn3/32config.yaml', help="path to config file")
+                        default='./scripts/config/trn3/224config.yaml', help="path to config file")
     # parser.add_argument("--config_path", type=str,
-    #                     default='./scripts/config/trn3/32resume.yaml', help="path to config file")
+    #                     default='./scripts/config/trn3/224resume.yaml', help="path to config file")
     args = parser.parse_args()
     main(args)

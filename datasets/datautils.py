@@ -19,12 +19,14 @@ from torch.utils.data import DataLoader
 def getNormalizeParameter(datasetname):
     if datasetname == '20-imagenet':
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
-    if datasetname == 'imagenet':
+    elif datasetname == 'imagenet':
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
-    if datasetname == 'celeba':
+    elif datasetname == 'celeba':
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
-    if datasetname == 'cifar10': 
+    elif datasetname == 'cifar10': 
         # return [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+        return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
+    elif datasetname == 'imagenette-320':
         return [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
     else:
         raise Exception('unknown dataset')
@@ -32,12 +34,14 @@ def getNormalizeParameter(datasetname):
 def getImageSize(datasetname):
     if datasetname == '20-imagenet':
         return 3, 224
-    if datasetname == 'imagenet':
+    elif datasetname == 'imagenet':
         return 3, 224
-    if datasetname == 'celeba':
+    elif datasetname == 'celeba':
         return 3, 224
-    if datasetname == 'cifar10':
+    elif datasetname == 'cifar10':
         return 3, 32
+    elif datasetname == 'imagenette-320':
+        return 3, 224
     else:
         raise Exception('unknown dataset')
 
@@ -63,7 +67,7 @@ def getDataSet(datasetname, root, train=True):
             assert os.path.exists(root), f'path {root} not exists'
             dataset = ImageFolder(root, transform=getTransforms(datasetname))
         return dataset
-    if datasetname == 'imagenet':
+    elif datasetname == 'imagenet':
         if train:
             root = root + '/imagenet/train'
             assert os.path.exists(root), f'path {root} not exists'
@@ -73,7 +77,7 @@ def getDataSet(datasetname, root, train=True):
             assert os.path.exists(root), f'path {root} not exists'
             dataset = ImageFolder(root, transform=getTransforms(datasetname))
         return dataset
-    if datasetname == 'celeba':
+    elif datasetname == 'celeba':
         if train:
             root = root + '/celeba/train'
             assert os.path.exists(root), f'path {root} not exists'
@@ -83,8 +87,18 @@ def getDataSet(datasetname, root, train=True):
             assert os.path.exists(root), f'path {root} not exists'
             dataset = ImageFolder(root, transform=getTransforms(datasetname))
         return dataset
-    if datasetname == 'cifar10':
+    elif datasetname == 'cifar10':
         dataset = CIFAR10(root, train=train, transform=getTransforms(datasetname), download=True)
+        return dataset
+    elif datasetname == 'imagenette-320':
+        if train:
+            root = root + '/imagenette-320/train'
+            assert os.path.exists(root), f'path {root} not exists'
+            dataset = ImageFolder(root, transform=getTransforms(datasetname))
+        else:
+            root = root + '/imagenette-320/val'
+            assert os.path.exists(root), f'path {root} not exists'
+            dataset = ImageFolder(root, transform=getTransforms(datasetname))
         return dataset
     else:
         raise Exception('unknown dataset') 

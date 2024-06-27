@@ -25,21 +25,35 @@ description: the encoder and teacher model have same basic structure,
     So we can create a father class for this two models to reduce the duplicate code.
 '''
 
+# HOOK_SIZE = {
+#     224: [56, 28, 14],
+#     256: [64, 32, 16],
+#     32: [16, 8]
+#     # 32: [16, 8, 4]
+# }
+
+# EMBEDING_RES = {
+#     224: 14,
+#     256: 8,
+#     32: 4
+# }
+
 HOOK_SIZE = {
-    224: [56, 28, 14, 7],
-    256: [64, 32, 16, 8],
+    224: [56, 28],
+    256: [64, 32, 16],
     32: [16, 8]
     # 32: [16, 8, 4]
 }
 
 EMBEDING_RES = {
-    224: 7,
+    224: 28,
     256: 8,
-    32: 2
+    32: 4
 }
 
 EMBEDING_CH = {
     32: {2:512, 4: 256, 8: 128, 16: 64},
+    224: {7:512, 14: 256, 28: 128, 56: 64},
 }
 
 # downsample module
@@ -82,10 +96,10 @@ class ResBlock(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             nn.GroupNorm(32, ch_in),
-            nn.SiLU(),
+            nn.ReLU(),
             nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1),
             nn.GroupNorm(32, ch_out),
-            nn.SiLU(),
+            nn.ReLU(),
             nn.Dropout(dropout),
             nn.Conv2d(ch_out, ch_out, kernel_size=3, stride=1, padding=1)
         )
@@ -112,11 +126,11 @@ class ConvBlock(nn.Module):
         self.block = nn.Sequential(
             nn.Conv2d(ch_in, ch_out, kernel_size=3, stride=1, padding=1),
             nn.GroupNorm(32, ch_out),
-            nn.SiLU(),
+            nn.ReLU(),
             nn.Dropout(dropout),
             nn.Conv2d(ch_out, ch_out, kernel_size=3, stride=1, padding=1),
             nn.GroupNorm(32, ch_out),
-            nn.SiLU(),
+            nn.ReLU(),
             nn.Dropout(dropout)
         )
 
@@ -320,91 +334,19 @@ class LaplacianFilter(nn.Module):
                 kernel_size: int,
                 channel: int) -> None:
         super(LaplacianFilter, self).__init__()
-        self.kernel_size = kernel_size
+        # self.kernel_size = kernel_size
+        # using 3 * 3 kernel can get more detail about the edge of the image
+        self.kernel_size = 3
         self.channel = channel
         self.kernel = torch.tensor([[0, 1, 0], [1, -4, 1], [0, 1, 0]]).float()
         self.kernel = self.kernel / 4
-        self.kernel = self.kernel.unsqueeze(0).repeat(channel, 1, 1, 1)
+        self.kernel = self.kernel.unsqueeze(0).repeat(self.channel, 1, 1, 1)
 
     def forward(self, x: Tensor) -> Tensor:
         self.kernel = self.kernel.to(x.device)
         x = nn.ReflectionPad2d(self.kernel_size // 2)(x)
         x = F.conv2d(x, weight=self.kernel, groups=self.channel)
         return x
-
-# Encoder module
-class Encoder_old(BaseModel):
-    '''
-    description: using the same structure as the teacher model
-    feature:
-    1. add gaussian group filters between layers 
-    TODO: have to check whether the hook can save gradient during backpropagation
-    '''
-
-    def __init__(self,
-                  model_name: str,
-                    input_resolution: int = 224,
-                    gaussian_group_size: int = 2) -> None:
-        super().__init__(model_name, False, 1000, input_resolution)
-
-        self.gaussian_group_size = gaussian_group_size
-
-        if 'resnet' in model_name:
-            # get the layers from the base model
-            self.conv1 = self.model.conv1
-            self.bn1 = self.model.bn1
-            self.relu = self.model.relu
-            self.maxpool = self.model.maxpool
-            self.layer1 = self.model.layer1
-            self.layer2 = self.model.layer2
-            self.layer3 = self.model.layer3
-            self.layer4 = self.model.layer4
-            del self.model.fc
-
-
-            
-            if input_resolution == 32:
-                kernel_size = 3
-            else:
-                kernel_size = 5
-            # for size in self.hook_size:
-            #     for i in range(gaussian_group_size):
-            #         self.register_module(f'gaussian{size}_{i}', GuassianFilter(kernel_size, self.hook_channel[size]))
-            #         self.register_module(f'laplacian{size}_{i}', LaplacianFilter(kernel_size, self.hook_channel[size]))
-            #     self.register_module(f'recover_{size}', ConvBlock(self.hook_channel[size] * (gaussian_group_size * 2 + 1), self.hook_channel[size]))
-        else:
-            raise Exception("The model name is not supported.")
-        
-    
-    def pass_gaussian(self, x: Tensor, size: int) -> Tensor:
-        '''
-        TODO: maybe add a conv layer here for better ulitization of the filters
-        '''
-        temp = []
-        temp.append(x)
-        for i in range(self.gaussian_group_size):
-            temp.append(self.__getattr__(f'gaussian{size}_{i}')(x))
-            temp.append(self.__getattr__(f'laplacian{size}_{i}')(x))
-        x = torch.cat(temp, dim=1)
-        x = self.__getattr__(f'recover_{size}')(x)
-        return x
-
-    def forward(self, x: Tensor) -> Tensor:
-        hook_result = {}
-        if 'resnet' in self.model_name:
-            x = self.conv1(x)
-            x = self.bn1(x)
-            x = self.relu(x)
-            x = self.maxpool(x)
-            for i in range(4):
-                x = self.__getattr__(f'layer{i+1}')(x)
-                if i < len(self.hook_size):
-                    # x = self.pass_gaussian(x, self.hook_size[i])
-                    hook_result[self.hook_size[i]] = x
-            # x = torch.flatten(x, 1)
-        else:
-            raise Exception("The model name is not supported.")
-        return x, hook_result 
 
 # Encoder module
 '''
@@ -438,7 +380,7 @@ class Encoder(nn.Module):
     '''
     def __init__(self, model_name:str, resolution:int,
                  use_res:bool=True,
-                 gaussian_layer:bool=False,
+                 gaussian_layer:bool=True,
                  gaussian_group_size:int=3) -> None:
         
         self.gaussian_group_size = gaussian_group_size
@@ -464,7 +406,7 @@ class Encoder(nn.Module):
         
         self.conv_in = nn.Conv2d(3, self.base_ch, kernel_size=3, stride=1, padding=1)
         self.bn1 = nn.GroupNorm(32, self.base_ch)
-        self.relu = nn.SiLU()
+        self.relu = nn.ReLU()
         if resolution != 32:
             self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
             cur_res = resolution // 2
@@ -602,7 +544,7 @@ class Decoder(nn.Module):
         self.layer1 = nn.Conv2d(
             cur_ch, cur_ch, kernel_size=3, stride=1, padding=1)
         self.gn = nn.GroupNorm(32, cur_ch)
-        self.silu = nn.SiLU()
+        self.silu = nn.ReLU()
         
         # check whether we need to hook the first layer
         if cur_res in self.hook_size:
@@ -750,6 +692,7 @@ def test_gaussian_filter():
     plt.figure()
     plt.imshow(to_pil(tensor))
 
+
 def test_laplacian_filter():
     from PIL import Image
     from torchvision import transforms as T
@@ -834,18 +777,18 @@ def test():
 
     
 if __name__ == '__main__':
-    # test_laplacian_filter()
+    test_laplacian_filter()
     # test()
-    res = 32
-    test_in_size = (1, 3, res, res)
+    # res = 224
+    # test_in_size = (1, 3, res, res)
     # model = TeacherModel('resnet18', res)
     # print(summary(model, test_in_size))
-    model2 = Encoder('resnet18', res)
-    model3 = Decoder(model2.zsize, res, model2.max_ch, model2.base_ch)
-    test_in_size2 = (1, model2.max_ch, EMBEDING_RES[res], EMBEDING_RES[res])
-    from torchinfo import summary
-    print(summary(model2, test_in_size))
-    print(summary(model3, test_in_size2))
+    # model2 = Encoder('resnet18', res)
+    # model3 = Decoder(model2.zsize, res, model2.max_ch, model2.base_ch)
+    # test_in_size2 = (1, model2.max_ch, EMBEDING_RES[res], EMBEDING_RES[res])
+    # from torchinfo import summary
+    # print(summary(model2, test_in_size))
+    # print(summary(model3, test_in_size2))
     # test_decoder()
     # test_gaussian_filter()
     # test_encoder()
